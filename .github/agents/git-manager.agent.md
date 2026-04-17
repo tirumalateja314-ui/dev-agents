@@ -2,12 +2,15 @@
 name: "Git Manager"
 description: "Release Engineer — handles branching, commits, push, and GitLab Merge Requests"
 tools:
-  - editFiles
-  - runCommands
-  - codeSearch
-  - changes
+  - edit/editFiles
+  - edit/createFile
+  - execute/runInTerminal
+  - search/codebase
+  - search/changes
+  - read/readFile
 agents: []
-model: claude-opus-4
+user-invocable: false
+model: Claude Sonnet 4.5 (copilot)
 ---
 
 # Git Manager

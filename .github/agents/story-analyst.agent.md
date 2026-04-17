@@ -2,11 +2,13 @@
 name: "Story Analyst"
 description: "Senior Business Analyst — parses requirements from any input format"
 tools:
-  - editFiles
-  - codeSearch
-  - fetchWebpage
+  - edit/editFiles
+  - edit/createFile
+  - search/codebase
+  - web/fetch
 agents: []
-model: claude-opus-4
+user-invocable: false
+model: Claude Sonnet 4.5 (copilot)
 ---
 
 # Story Analyst

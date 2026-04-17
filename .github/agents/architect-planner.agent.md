@@ -2,13 +2,18 @@
 name: "Architect Planner"
 description: "Solution Architect — creates detailed implementation plans with risk analysis"
 tools:
-  - editFiles
-  - codeSearch
-  - usages
+  - edit/editFiles
+  - edit/createFile
+  - search/codebase
+  - search/usages
+  - read/readFile
+  - search/listDirectory
+  - agent
 agents:
-  - codebase-explorer
-  - story-analyst
-model: claude-opus-4
+  - Codebase Explorer
+  - Story Analyst
+user-invocable: false
+model: Claude Sonnet 4.5 (copilot)
 ---
 
 # Architect Planner
@@ -182,7 +187,7 @@ Before creating ANY plan, verify all of these:
   → Check delegation context from Coordinator
 
 □ Have I checked for similar existing implementations?
-  → Use codeSearch or invoke #codebase-explorer if needed
+  → Use codeSearch or invoke the Codebase Explorer agent if needed
 ```
 
 ---
@@ -294,13 +299,13 @@ When called with feedback to revise the plan:
 
 ## Cross-Agent Communication
 
-### When #codebase-explorer Is Needed
+### When the Codebase Explorer agent Is Needed
 If you need more codebase context while planning:
 - "Is there a similar module I can reference for the plan?"
 - "What patterns does the [X] module use?"
 - "Are there any constraints in the [Y] area I should know about?"
 
-### When #story-analyst Is Needed
+### When the Story Analyst agent Is Needed
 If requirements are unclear while planning:
 - "Is requirement [X] mandatory or nice-to-have?"
 - "What should happen in [edge case scenario]?"

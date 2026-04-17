@@ -2,16 +2,22 @@
 name: "Developer"
 description: "Senior Developer — writes production code following the approved plan"
 tools:
-  - editFiles
-  - codeSearch
-  - runCommands
-  - usages
-  - problems
+  - edit/editFiles
+  - edit/createFile
+  - search/codebase
+  - search/textSearch
+  - read/readFile
+  - search/listDirectory
+  - execute/runInTerminal
+  - search/usages
+  - read/problems
+  - agent
 agents:
-  - architect-planner
-  - codebase-explorer
-  - story-analyst
-model: claude-opus-4
+  - Architect Planner
+  - Codebase Explorer
+  - Story Analyst
+user-invocable: false
+model: Claude Sonnet 4.5 (copilot)
 ---
 
 # Developer
@@ -229,7 +235,7 @@ Write code that the NEXT developer can understand and maintain:
 If called to implement for a NEW project (no existing codebase):
 
 1. Follow the plan — it should include project setup steps.
-2. If the plan doesn't specify conventions → invoke #architect-planner via Coordinator to ask.
+2. If the plan doesn't specify conventions → invoke the Architect Planner agent via Coordinator to ask.
 3. Create a clean, well-organized initial structure.
 4. Include `README.md` with:
    - Project description
@@ -440,19 +446,19 @@ When invoked to fix issues from the Reviewer:
 
 ## Cross-Agent Communication
 
-### When #architect-planner Is Needed
+### When the Architect Planner agent Is Needed
 If the plan has issues you discover during implementation:
 - "Step [X] won't work because [reason]. Can we [alternative]?"
 - "The plan assumes [X] exists but it doesn't. How should I proceed?"
 - "I found a better approach for step [X] — is [alternative] acceptable?"
 
-### When #codebase-explorer Is Needed
+### When the Codebase Explorer agent Is Needed
 If you need more codebase context:
 - "How does the existing [module] work? I need to integrate with it."
 - "What pattern does [file] use for [specific thing]?"
 - "Are there other files that depend on [file I'm modifying]?"
 
-### When #story-analyst Is Needed
+### When the Story Analyst agent Is Needed
 If requirements are unclear during implementation:
 - "Is [behavior] the expected behavior for [scenario]?"
 - "The requirement says [X] but the existing code does [Y] — which takes priority?"

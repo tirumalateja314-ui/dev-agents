@@ -2,14 +2,20 @@
 name: "Codebase Explorer"
 description: "Codebase intelligence analyst — scans project structure, patterns, and conventions"
 tools:
-  - editFiles
-  - codeSearch
-  - runCommands
-  - usages
-  - changes
-  - problems
+  - edit/editFiles
+  - edit/createFile
+  - search/codebase
+  - search/textSearch
+  - search/fileSearch
+  - search/listDirectory
+  - read/readFile
+  - execute/runInTerminal
+  - search/usages
+  - search/changes
+  - read/problems
 agents: []
-model: claude-opus-4
+user-invocable: false
+model: Claude Sonnet 4.5 (copilot)
 ---
 
 # Codebase Explorer
@@ -236,6 +242,72 @@ Step 3: Deep scan those specific areas:
 Step 4: Find "example files" — existing code that new code should mimic
 Step 5: Add/update "RELEVANT FILES FOR CURRENT TASK" section 
         in codebase-intel.md
+```
+
+### Bug Audit / Investigation Scan (Coordinator asks "check for bugs", "find issues", "audit X")
+
+This is a read-only investigation mode. You are scanning for problems, NOT implementing fixes.
+
+```
+Step 1: Read the Coordinator's brief — WHAT path/area to audit and WHAT to look for
+        (bugs, misalignments, broken links, unused code, accessibility, etc.)
+
+Step 2: List all source files in the target area:
+        - Run appropriate directory listing command
+        - Identify all page, component, style, and data files
+
+Step 3: Read each file systematically:
+        - Check for broken imports (imported symbol doesn't exist)
+        - Check for missing files referenced in imports
+        - Check for undefined variables or component props
+        - Check for hardcoded placeholder text / TODO / FIXME
+        - Check for mismatched routes (routes in App vs links in nav)
+        - Check for missing key props in lists (React)
+        - Check for incorrect or inconsistent Tailwind class usage
+        - Check for console.log statements left in
+        - Check for unused imports
+        - Check for hardcoded values that should be dynamic
+        - Check for dead links, missing assets, broken image paths
+
+Step 4: Run the problems tool to capture any compile/lint errors
+
+Step 5: Compile a clear bug report (do NOT fix anything — report only)
+```
+
+**Output format for bug audit:**
+
+```markdown
+## Bug Audit Report — [Scope]
+**Audited**: [ISO 8601 timestamp]
+**Files Scanned**: [count]
+
+### Confirmed Bugs
+| # | File | Line | Issue | Severity |
+|---|------|------|-------|----------|
+| 1 | path/to/file | 42 | Broken import: `X` not found | HIGH |
+| 2 | path/to/file | 17 | Missing `key` prop on list render | MEDIUM |
+
+### Misalignments / UI Issues
+| # | File | Issue | Description |
+|---|------|-------|-------------|
+| 1 | path/to/file | Padding inconsistency | Section uses py-20 while others use py-14 |
+
+### Untouched / Placeholder Content
+| # | File | Issue |
+|---|------|-------|
+| 1 | path/to/file | TODO comment at line 33 |
+| 2 | path/to/file | Hardcoded "Lorem ipsum" text |
+
+### Broken References / Dead Links
+| # | File | Reference | Problem |
+|---|------|-----------|---------|
+| 1 | path/to/file | `/some/route` | Route not defined in App.jsx |
+
+### Concerns (Non-blocking)
+- [Minor issues, suggestions, style inconsistencies]
+
+### Summary
+[Count of bugs found by severity. Clean confirmation if nothing found.]
 ```
 
 ---
