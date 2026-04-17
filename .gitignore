@@ -1,0 +1,27 @@
+# Docs website (separate deployment)
+docs-website/
+
+# Node
+node_modules/
+
+# VS Code local config — machine-specific paths, tokens, workspace IDs
+.vscode/
+
+# Internal planning & spec docs — not for public
+AGENT SPECIFICATION DOCUMENT.md
+Implementation plan.md
+temp.md
+docs-plan.md
+imp-plan.md
+full-extraction.md
+normal-picture.md
+mcp-connection.md
+
+# Env files — never commit secrets
+.env
+.env.local
+.env.*
+
+# OS
+.DS_Store
+Thumbs.db
