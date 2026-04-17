@@ -1,12 +1,12 @@
 # DevAgent — Global Instructions
 
-These instructions apply to **ALL agents** in the DevAgent multi-agent workflow. Every agent — Coordinator, Story Analyst, Codebase Explorer, Architect Planner, Developer, Tester, Reviewer, and Git Manager — must follow these rules at all times.
+These instructions apply to **ALL agents** in the DevAgent multi-agent workflow. Every agent — Coordinator, Story Analyst, Codebase Explorer, Researcher, Architect Planner, Developer, Tester, Reviewer, and Git Manager — must follow these rules at all times.
 
 ---
 
 ## 1. System Overview
 
-This project uses the **DevAgent multi-agent workflow** — a team of 8 AI agents inside VS Code Copilot that collaborate like a real development team. The user gives a task (Jira link, pasted text, or both), and agents work together to deliver production-ready code with tests, review, and git operations.
+This project uses the **DevAgent multi-agent workflow** — a team of 9 AI agents inside VS Code Copilot that collaborate like a real development team. The user gives a task (Jira link, pasted text, or both), and agents work together to deliver production-ready code with tests, review, and git operations.
 
 **Architecture**: Coordinator + Subagents pattern.
 - The **Coordinator** is the ONLY agent the user talks to directly.
@@ -86,6 +86,66 @@ This project uses the **DevAgent multi-agent workflow** — a team of 8 AI agent
 - If context is getting too large → focus on the current task, not the entire project.
 - Keep your context file entries concise so other agents can parse them efficiently.
 
+### RULE 11: RESPECT USER-DEFINED SCOPE — PER-PATH ACCESS LEVELS, ALWAYS CLARIFIED UPFRONT
+
+**Scope is per-path, not global. Different folders/files can have different access levels. The Coordinator MUST confirm the scope map with the user before any agent starts work.**
+
+#### Each path in the scope map gets one of three access levels:
+
+| Access Level | What agents may do with that path |
+|---|---|
+| **READ-WRITE** | Read and edit freely |
+| **READ-ONLY** | Read for context, never edit |
+| **NO-ACCESS** | Do not read or touch at all |
+
+#### Real-world examples of per-path scope maps:
+```
+# Frontend dev working on UI — backend is reference-only
+src/frontend/   → READ-WRITE
+src/backend/    → READ-ONLY   (understand API contracts, don't change them)
+src/database/   → NO-ACCESS
+
+# Bug fix scoped to one service, with shared utils as read-only context
+src/auth/       → READ-WRITE
+src/shared/     → READ-ONLY
+everything else → NO-ACCESS
+
+# Full-stack but DB is off-limits
+src/            → READ-WRITE
+db/migrations/  → NO-ACCESS
+```
+
+#### How scope is stored once confirmed:
+The Coordinator writes the scope map into `task-status.md` under `## Scope Restrictions` in this format:
+```
+## Scope Restrictions
+| Path | Access |
+|------|--------|
+| src/frontend/ | READ-WRITE |
+| src/backend/  | READ-ONLY  |
+| src/database/ | NO-ACCESS  |
+```
+
+#### How agents use the scope map:
+- **Before reading any file** — check its path against the map. NO-ACCESS = do not open it.
+- **Before editing any file** — check its path. READ-ONLY or NO-ACCESS = STOP.
+- **Path not listed in the map** — treat as NO-ACCESS and ask Coordinator before proceeding.
+- Every subagent receives the full scope map in the `CONSTRAINTS` block of their delegation.
+
+#### If an agent needs to exceed its path's access level:
+1. **STOP immediately.** Do not perform the action.
+2. Report to the Coordinator with:
+   - **Path**: which file/folder
+   - **Current access**: what level is set for that path
+   - **What you need**: read or edit
+   - **Why**: specific reason (e.g. "need to read src/backend/auth.ts to understand the token shape the frontend must send")
+   - **Impact if denied**: what breaks or degrades
+   - **Alternative**: can the task proceed without it?
+3. Coordinator presents to user, waits for decision, logs in `decisions-and-blockers.md`, relays back.
+
+#### No scope stated:
+If the user gives no scope, agents have normal discretion — but must still follow RULE 4 (stay in lane) and flag large-impact touches to the Coordinator.
+
 ---
 
 ## 3. Context File System
@@ -104,6 +164,7 @@ All shared state lives in `.github/context/`. This is the team's shared whiteboa
 | `test-results.md` | Tester | Tests written, results, bugs found |
 | `review-report.md` | Reviewer | Verdict, issues, requirements verification |
 | `git-status.md` | Git Manager | Branch, commits, CI status, MR link |
+| `research-findings.md` | Researcher | Web research findings, sourced and rated (accumulates) |
 | `decisions-and-blockers.md` | Coordinator | Decision log, open blockers, escalation history |
 
 ### Ownership Rules

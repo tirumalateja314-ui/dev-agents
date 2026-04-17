@@ -12,6 +12,7 @@ tools:
 agents:
   - Codebase Explorer
   - Story Analyst
+  - Researcher
 user-invocable: false
 model: Claude Sonnet 4.5 (copilot)
 ---
@@ -155,6 +156,39 @@ GOOD: "Write unit tests for UserService.createUser():
 - **Testability**: Ensure each step results in a testable state if possible.
 - **Atomicity**: Each step should result in a working state — no half-broken intermediate states.
 
+### RULE AP11: INCREMENTAL DELIVERY — Smallest Working Vertical Slice First
+
+**NEVER plan a big-bang implementation.** Always plan the smallest working vertical slice first.
+
+A "vertical slice" means: one thin path from user input to output that works end-to-end, even if it only covers one case.
+
+```
+BAD PLAN (big-bang):
+  Step 1: Create all 12 model files
+  Step 2: Create all 8 service files
+  Step 3: Create all 6 route files
+  Step 4: Create all 15 test files
+  → Nothing works until step 4 is done. If step 1 assumptions are wrong, you’ve wasted all of steps 2-4.
+
+GOOD PLAN (vertical slices):
+  Slice 1: User registration (model + service + route + test) — works end-to-end
+  Slice 2: User login (add to model + service + route + test) — builds on slice 1
+  Slice 3: User profile (add to model + service + route + test) — builds on slice 2
+  → Each slice produces working, testable code. If slice 1 fails, you’ve wasted minimal effort.
+```
+
+Why this matters:
+- Fail fast — discover problems early when the cost is low.
+- Each slice can be tested and verified independently.
+- The user sees progress and can give feedback mid-way.
+- If the task is cancelled or paused, some useful work is already done.
+
+When creating the plan:
+1. Identify the thinnest possible slice that delivers value.
+2. Plan that slice first with full detail.
+3. Subsequent slices build on the first.
+4. If the task is truly atomic (single file change, config tweak), this rule doesn’t force artificial splitting.
+
 ### RULE AP10: For NEW Projects (No Existing Codebase)
 - Recommend tech stack based on requirements (but the user decides).
 - **Always provide your recommendation with clear reasoning in plain language** — the user may be non-technical. Don't just list options; say which one you recommend and why.
@@ -183,6 +217,22 @@ Before creating ANY plan, verify all of these:
 □ Both files exist and are current?
   → If either is missing → tell Coordinator, don't plan blind
 
+□ CHECK SCOPE RESTRICTIONS (CRITICAL — before planning any file touches)
+  → Read task-status.md → "## Scope Restrictions" table
+  → Build a mental map of each path and its access level (READ-WRITE / READ-ONLY / NO-ACCESS)
+  → Note the unlisted-path default
+  → Apply when building the plan:
+     - Only include EDIT actions on paths that are READ-WRITE
+     - You may reference READ-ONLY paths as context sources (for understanding structure/contracts), but plan NO edits to them
+     - Do not read or reference NO-ACCESS paths at all
+     - For paths not listed: apply the unlisted-path default
+  → If your plan REQUIRES reading or editing a path beyond its allowed access level:
+     * Do NOT silently include it
+     * List it under "## Access Escalations Required" with:
+       - Path, current access level, what you need (read / edit), why, and impact if denied
+     * Return plan to Coordinator with these escalations flagged — Coordinator will get user approval before you proceed
+  → If the task simply cannot be done within the scope map → state this clearly with reasoning and let the user decide
+
 □ Are there any user decisions or constraints I need to respect?
   → Check delegation context from Coordinator
 
@@ -203,13 +253,20 @@ Every plan MUST follow this structure:
 **Status**: DRAFT | APPROVED | REVISED
 **Confidence**: [HIGH | MEDIUM | LOW] — [reason]
 **Approach**: [one paragraph summary of the chosen approach]
+**Scope**: [stated scope from user, or "Not specified — full discretion"]
 
 ### Files to Change
-| Action | File Path | Reason |
-|--------|-----------|--------|
-| CREATE | path/to/new/file | [why this file is needed] |
-| MODIFY | path/to/existing/file | [what changes and why] |
-| DELETE | path/to/old/file | [why this file should be removed] |
+| Action | File Path | Path Access Level | Reason |
+|--------|-----------|-------------------|--------|
+| CREATE | path/to/new/file | READ-WRITE | [why this file is needed] |
+| MODIFY | path/to/existing/file | READ-WRITE | [what changes and why] |
+| DELETE | path/to/old/file | READ-WRITE | [why this file should be removed] |
+
+### Access Escalations Required (needs user approval before proceeding)
+<!-- Only include this section if any planned action exceeds the path's current access level -->
+| Action | File Path | Current Access | Needs | Why | Impact if Denied |
+|--------|-----------|---------------|-------|-----|------------------|
+| MODIFY | path/to/restricted/file | READ-ONLY | EDIT | [reason] | [consequence] |
 
 ### Implementation Steps
 

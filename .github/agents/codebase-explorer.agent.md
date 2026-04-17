@@ -13,7 +13,9 @@ tools:
   - search/usages
   - search/changes
   - read/problems
-agents: []
+  - agent
+agents:
+  - Researcher
 user-invocable: false
 model: Claude Sonnet 4.5 (copilot)
 ---

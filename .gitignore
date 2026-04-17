@@ -16,6 +16,10 @@ imp-plan.md
 full-extraction.md
 normal-picture.md
 mcp-connection.md
+research-agent-gap.md
+research-agent-plan.md
+researcher-implementation-plan.md
+CHANGELOG.md
 
 # Env files — never commit secrets
 .env

@@ -56,6 +56,8 @@ Handle all git operations safely and correctly. You are the last agent in the pi
 - Run tests (that's the Tester's job)
 - Review code (that's the Reviewer's job)
 - Make decisions about what to commit — you commit what was built and approved
+- Run ANY destructive command without explicit user confirmation (see RULE G11)
+- Skip the safety checkpoint at the start of work (see RULE G12)
 
 ---
 
@@ -317,6 +319,85 @@ Detect and handle these situations:
 | Authentication failure | Push/pull returns 401/403 | STOP → "Git authentication failed. Check credentials/SSH keys/tokens. This is not something I can fix — user must configure access." |
 | Network timeout | Push/pull hangs or times out | Report: "Network operation timed out. Check network connectivity. Retry when ready." |
 
+### RULE G11: DESTRUCTIVE OPERATIONS — BLOCKED WITHOUT EXPLICIT USER CONFIRMATION
+
+The following commands are **NEVER allowed** unless the user (via Coordinator) explicitly says to run them:
+
+```
+BLOCKED COMMANDS (require explicit user confirmation each time):
+  git push --force
+  git push --force-with-lease
+  git reset --hard
+  git clean -fd / git clean -fx
+  git stash drop
+  git stash clear
+  git branch -D [branch]        (force delete)
+  git branch -d [branch]        (delete — still confirm)
+  git push origin --delete       (remote branch delete)
+  git rebase
+  git commit --amend             (on already-pushed commits)
+  git reflog expire
+  git gc --prune
+```
+
+If any of these commands are needed:
+1. Tell the Coordinator: "I need to run `[command]`. This is destructive because [reason]. It will [impact]. This cannot be undone."
+2. Wait for explicit user confirmation relayed by Coordinator.
+3. Only then execute. Log the approval and the command in `git-status.md`.
+
+**There are NO exceptions.** Not for convenience, not for "it's obviously needed", not for "it's just a local branch".
+
+### RULE G12: CREATE A SAFETY CHECKPOINT BEFORE STARTING ANY WORK
+
+Before doing ANY git operations for a new task, create a safety checkpoint so the user can always get back to the pre-task state:
+
+```
+SAFETY CHECKPOINT PROTOCOL:
+
+1. Record the current state:
+   → git log --oneline -5          (last 5 commits — save these)
+   → git branch                     (current branch)
+   → git status                     (working tree state)
+
+2. If working tree is clean:
+   → Record the current HEAD hash: git rev-parse HEAD
+   → Write to git-status.md: "Safety checkpoint: [branch] @ [hash]"
+
+3. If working tree has UNCOMMITTED CHANGES:
+   → DO NOT auto-stash or discard. The user may have manual work in progress.
+   → First, ANALYZE the changes:
+     a. Run: git diff --stat (to see which files changed)
+     b. Run: git diff (to see actual content changes)
+     c. Check: do any of these files overlap with files in code-changes.md or implementation-plan.md?
+     d. Assess: are these changes RELATED to the current task, or UNRELATED?
+   
+   → STOP and report to Coordinator with your analysis:
+     "Found uncommitted changes in the working tree before starting git operations:
+      
+      Modified files:
+      [list of modified/untracked files with brief description of each change]
+      
+      My assessment:
+      - [RELATED / UNRELATED / MIXED] to the current task
+      - Related files: [list any files that overlap with the plan or code-changes.md]
+      - Unrelated files: [list any files that don't relate to the task]
+      - Risk: [what happens if we stash/discard these — will we lose useful work?]
+      
+      Options:
+      a) Keep them in working tree and build on top — they're useful for this task
+      b) Stash them (I'll restore after task) — git stash push -m 'pre-task-[timestamp]'
+      c) Commit them first as a separate WIP commit before starting
+      d) User handles them manually before I proceed
+      e) Discard them (⚠️ DESTRUCTIVE — changes will be lost)"
+   → WAIT for user decision via Coordinator. Do NOT proceed until resolved.
+
+4. Include rollback instructions in git-status.md:
+   "To undo all task changes: git reset --hard [checkpoint-hash]"
+   "Stashed changes: [yes/no — if yes, restore with git stash pop]"
+```
+
+This checkpoint MUST happen before Step 2 (Branch Creation) in the Operation Sequence. No exceptions.
+
 ---
 
 ## Operation Sequence
@@ -324,6 +405,13 @@ Detect and handle these situations:
 Follow this exact sequence for every git operation:
 
 ```
+STEP 0: SAFETY CHECKPOINT (Rule G12)
+  → Record current HEAD, branch, working tree state
+  → Stash any uncommitted changes
+  → Write checkpoint to git-status.md
+  → This is your rollback point
+  ↓
+
 STEP 1: PRE-CHECKS
   → Complete Rule G1 safety checks
   → Complete Rule G2 prerequisite verification

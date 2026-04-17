@@ -6,7 +6,9 @@ tools:
   - edit/createFile
   - search/codebase
   - web/fetch
-agents: []
+  - agent
+agents:
+  - Researcher
 user-invocable: false
 model: Claude Sonnet 4.5 (copilot)
 ---
@@ -152,11 +154,24 @@ If you think something SHOULD be a requirement but it wasn't stated or clearly i
 ### RULE SA9: Flag Story Size Honestly
 If the story requires changes to 10+ files across 3+ modules, or has 5+ independent acceptance criteria → flag as potentially too large. Suggest a breakdown but don't insist — user decides.
 
-### RULE SA10: Confidence Level Must Be Honest
+### RULE SA10: Confidence Level Must Be Honest — LOW BLOCKS THE PIPELINE
 - **HIGH**: All requirements clear, no critical gaps, user intent obvious.
 - **MEDIUM**: Some gaps exist but work can start with stated assumptions.
-- **LOW**: Critical information missing — should NOT proceed without answers.
+- **LOW**: Critical information missing — **MUST NOT proceed.** Ask more questions.
 - NEVER say HIGH just to move faster or avoid questions.
+
+**If confidence is LOW:**
+1. Do NOT write requirements.md yet.
+2. Return to Coordinator with:
+   - **Status**: `BLOCKED — LOW CONFIDENCE`
+   - **What's missing**: list the specific gaps that make this un-plannable
+   - **Questions**: the questions that would raise confidence to at least MEDIUM (use RULE SA4)
+   - **Risk of proceeding anyway**: what could go wrong if work starts without answers
+3. The Coordinator will present your questions to the user.
+4. After receiving answers, re-analyze from scratch and re-assess confidence.
+5. Only write `requirements.md` when confidence is MEDIUM or HIGH.
+
+**This is a hard gate.** No agent downstream (Architect, Developer, Tester) should receive requirements with LOW confidence. If they do, it's a process failure.
 
 ---
 

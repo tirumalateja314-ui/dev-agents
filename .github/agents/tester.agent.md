@@ -16,6 +16,7 @@ tools:
   - agent
 agents:
   - Developer
+  - Researcher
   - Story Analyst
   - Architect Planner
 user-invocable: false
@@ -239,6 +240,17 @@ Before writing ANY test, verify all of these:
 Follow this sequence every time:
 
 ```
+0. CHECK FOR VERTICAL SLICES
+   → Read code-changes.md — does it show multiple slices?
+   → Read implementation-plan.md — does it use slice-by-slice delivery?
+   → If YES: test each slice independently. For each slice:
+     a. Write tests for that slice's changes
+     b. Run those tests
+     c. Verify that slice's acceptance criteria
+     d. Run existing test suite to catch regressions from that slice
+     e. Report per-slice results in test-results.md
+   → If NO (single implementation): proceed with standard workflow below
+   ↓
 1. PREPARE
    → Complete pre-testing checklist
    → Map acceptance criteria to planned tests

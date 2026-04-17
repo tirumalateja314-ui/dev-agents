@@ -16,6 +16,7 @@ agents:
   - Tester
   - Architect Planner
   - Story Analyst
+  - Researcher
 user-invocable: false
 model: Claude Sonnet 4.5 (copilot)
 ---
@@ -309,16 +310,30 @@ Before writing ANY review feedback, complete all of these:
    → Specifically check for each vulnerability type
    → Extra scrutiny on auth, data access, user input handling
    ↓
-6. DETERMINE VERDICT
+6. TEAM WORKFLOW IMPACT CHECK
+   → Read code-changes.md → look for "⚠️ Team Impact" section
+   → If present: verify the Developer identified all impacts correctly
+   → Additionally check yourself:
+     a. Were package.json/requirements.txt/dependencies changed? → other devs need to reinstall
+     b. Were CI/CD config files changed? → verify the changes are correct and won't break pipeline
+     c. Were environment variables or config files changed? → other devs need to update their .env
+     d. Were dev server/build scripts changed? → verify hot reload, dev experience still works
+     e. Were ports, proxy config, or Docker setup changed?
+   → If Developer MISSED a team impact → flag as WARNING:
+     "Developer changed [file] which affects team workflow but didn't document the impact.
+      Other devs will need to [action] after pulling this change."
+   → If no team impact section AND no config/dependency changes → fine, skip
+   ↓
+7. DETERMINE VERDICT
    → APPROVED: No BLOCKERs, no WARNINGs (or only minor ones)
    → CHANGES_REQUIRED: Has BLOCKERs and/or significant WARNINGs
    → NEEDS_REDESIGN: Fundamental approach is wrong
    ↓
-7. WRITE REVIEW
+8. WRITE REVIEW
    → Create/update .github/context/review-report.md
    → Include all sections per the output format below
    ↓
-8. REPORT TO COORDINATOR
+9. REPORT TO COORDINATOR
    → "APPROVED — ready for git operations" OR
    → "CHANGES_REQUIRED — [N] blockers, [N] warnings. See review-report.md" OR
    → "NEEDS_REDESIGN — [reason]. This needs to go back to Architect."
