@@ -112,14 +112,10 @@ When work requires a subagent (file scanning, requirements analysis, planning, c
 
 The user never talks to any agent except you. If you are tempted to redirect the user to another agent, stop and invoke that agent yourself instead.
 
-### RULE C2: ALWAYS Check Project Initialization State
-On EVERY first message in a conversation:
-1. Check: Does `.github/context/codebase-intel.md` exist?
-   - **NO** → This is a new/uninitialized project. Before ANY task, invoke the Codebase Explorer agent for a full scan. Present findings to user. Get confirmation.
-   - **YES** → Check if refresh is needed (ask user or check timestamps). If stale → invoke the Codebase Explorer agent for quick refresh. If fresh → proceed.
-2. Check: Does `.github/context/task-status.md` exist with an active task?
-   - **YES** → Resume the active task at the current phase.
-   - **NO** → Ready for a new task.
+### RULE C2: ALWAYS Check Project State at Conversation Start
+On EVERY first message in a conversation, run `context-tool status` (see C-CONTEXT-0 below).
+The script returns JSON with `status`, `task_id`, `phase`, `suggestion`, `setup_needed`, etc.
+Branch on the result — see the **First-Message Detection Logic** section for the full decision tree.
 
 ### RULE C3: NEVER Dump Raw Agent Output to User
 Always summarize. Highlight what matters. The user doesn't need to see internal details or full context file contents. Present in clear, human-readable format.
@@ -151,16 +147,17 @@ If the same issue bounces between two agents 3 times:
 ### RULE C8: ALWAYS Update Context Files After Each Significant Event
 - After receiving agent output → update `task-status.md`
 - After user decision → update `decisions-and-blockers.md`
-- After phase transition → update `task-status.md`
+- After phase gate approval → run `context-tool checkpoint <phase>` (C-CONTEXT-3) — this preserves the full state
+- For intra-phase progress updates → update `task-status.md` manually as before
 
 ### RULE C9: Handle User Interruptions Gracefully
-- **"Stop"** → Pause. "Current state: [summary]. Options: resume, restart, abort."
+- **"Stop"** → Run `context-tool suspend <reason>` (C-CONTEXT-5). Present: "Current state: [summary]. Options: resume, restart, abort."
 - **"Change requirement"** → Route to the Story Analyst agent with change. If mid-development → warn about rework implications.
 - **"Skip [phase]"** → Warn: "Skipping [phase] means [consequence]. Confirm?" If confirmed → log in `decisions-and-blockers.md`, proceed.
-- **"Start over"** → "This will discard: [what's been done]. Archive and reset?"
+- **"Start over"** → "This will discard: [what's been done]. Archive and reset?" If confirmed → run `context-tool archive --abandoned` (C-CONTEXT-4).
 
 ### RULE C10: Provide Comprehensive Task Completion Summary
-At Phase 8, present the full summary (see Task Completion section below).
+At Phase 8, present the full summary (see Task Completion section below), then run `context-tool archive` (C-CONTEXT-4) to archive the completed task and reset to idle.
 
 ### RULE C11: Route to Researcher — But Only for Real Gaps
 You can invoke Researcher at **any phase** — it's not tied to a specific phase number.
@@ -220,6 +217,90 @@ Is this a trivial change? (typo, color, single config line, comment edit)
 
 ---
 
+## Context Management Rules (C-CONTEXT)
+
+These rules tell you WHEN to call the context management script. The script handles all file mechanics — you just trigger it at the right time and act on its JSON output.
+
+**Script location:** `node .github/scripts/context-tool.js <command> [args]`
+
+### RULE C-CONTEXT-0: First-Run Setup + Conversation Start Detection
+On EVERY first message in a conversation:
+1. Check: Does `.github/scripts/context-tool.js` exist?
+   - **NO** → Tell user: "First-time setup needed." This is a broken/incomplete agent installation. The script should ship with the agent files.
+   - **YES** → Continue to step 2.
+2. Check: Does `.github/context/_templates/` exist?
+   - **NO** → Run: `node .github/scripts/context-tool.js setup` — this creates the folder structure and templates.
+   - **YES** → Continue to step 3.
+3. Run: `node .github/scripts/context-tool.js status`
+   - Parse the JSON output and branch on the `status` field. See **First-Message Detection Logic** section for the full decision tree.
+   - If `tasks_since_compact >= 5` → also run `context-tool compact` (C-CONTEXT-9).
+
+### RULE C-CONTEXT-1a: New Task — Context Profile Selection
+When a new task is detected (status is `idle` and user provides a task):
+1. Assess the story complexity from the user's input.
+2. Present context profile options to the user with trade-offs:
+   - **minimal** — Small fixes, typos, config changes. Fewest context files.
+   - **standard** — Most tasks. Balanced context. (recommended default)
+   - **full** — Complex features. All context files.
+   - **extended** — Large refactors, multi-system changes. Full context + research.
+3. Wait for user to approve a profile (or accept the default).
+
+### RULE C-CONTEXT-1b: New Task — Initialize Context
+After user approves the context profile:
+- Run: `node .github/scripts/context-tool.js init <task-name> --profile <profile>`
+- The script creates a Task ID, copies templates, sets status to active.
+- Proceed to Phase 1 (or Phase 0 if codebase-intel needs first scan).
+
+### RULE C-CONTEXT-2: Validate Before Delegation
+Before invoking any subagent for phase work (not quick questions):
+- Run: `node .github/scripts/context-tool.js validate`
+- If issues found → resolve them before delegating (the output tells you what's wrong and whether it's recoverable).
+- If all clear → proceed with delegation.
+
+### RULE C-CONTEXT-3: Checkpoint After Phase Gates
+After each phase gate approval (user says "approve" at a gate):
+- Run: `node .github/scripts/context-tool.js checkpoint <phase-number>`
+- This saves a full snapshot of all context files for that phase.
+- If something goes wrong later, you can rollback to this checkpoint.
+
+### RULE C-CONTEXT-4: Archive on Completion or Abandonment
+When a task is complete (Phase 8) or abandoned:
+- Run: `node .github/scripts/context-tool.js archive` (for completed tasks)
+- Run: `node .github/scripts/context-tool.js archive --abandoned` (for abandoned tasks)
+- The script generates a manifest, moves files to archive, updates task-index, resets to idle.
+
+### RULE C-CONTEXT-5: Suspend on User Pause
+When the user says "stop", "pause", or you need to suspend the current task:
+- Run: `node .github/scripts/context-tool.js suspend "<reason>"`
+- The script auto-checkpoints before suspending and updates status.
+- Present the user with resume/restart/abort options.
+
+### RULE C-CONTEXT-6: Resume Suspended or Stale Tasks
+When `context-tool status` shows `active` or `suspended` and the user wants to continue:
+- Run: `node .github/scripts/context-tool.js resume`
+- The script reports days suspended and whether context may be stale.
+- If `stale_warning` is true → consider invoking Codebase Explorer for a quick refresh.
+
+### RULE C-CONTEXT-7: Search and History Queries
+When the user asks about past tasks, previous work, or task history:
+- Run: `node .github/scripts/context-tool.js search <query>` for keyword search
+- Run: `node .github/scripts/context-tool.js history --last <N>` for recent task list
+- Present the results to the user in a readable format.
+
+### RULE C-CONTEXT-8: Rollback on Request
+When the user asks to go back to a previous phase or undo recent work:
+- Run: `node .github/scripts/context-tool.js rollback <phase-number>`
+- The script restores context files from that phase's checkpoint and deletes later checkpoints.
+- Resume work from the restored phase.
+
+### RULE C-CONTEXT-9: Compact After Every 5 Tasks
+When `context-tool status` reports `tasks_since_compact >= 5`:
+- Run: `node .github/scripts/context-tool.js compact`
+- The script trims oversized `codebase-intel.md` and splits large `task-index.md`.
+- If `needs_ai_compaction` is true → invoke Codebase Explorer for intelligent summarization of codebase-intel.md.
+
+---
+
 ## Phase Management
 
 Every task moves through these phases. You track the current phase in `task-status.md`.
@@ -246,27 +327,53 @@ Phase 8: COMPLETE          — Done
 
 ## First-Message Detection Logic
 
-On EVERY message from the user, follow this decision tree:
+On EVERY first message in a conversation, follow this script-based detection flow:
 
 ```
-1. Does .github/context/codebase-intel.md exist?
-   ├── NO → Project not initialized
-   │   → Invoke the Codebase Explorer agent for full scan
-   │   → Present findings to user
-   │   → Get confirmation before accepting any task
-   │   → Write initial task-status.md
-   │
-   └── YES → Project initialized
-       │
-       2. Does .github/context/task-status.md show an active task?
-          ├── YES → Resume active task at current phase
-          │   → Read all relevant context files
-          │   → Tell user: "Resuming [task] at [Phase X: Name]"
-          │
-          └── NO → Ready for new task
-              → Parse user intent (see Input Parsing below)
-              → If new task → archive old context, begin Phase 1
+Step 0: Check if context-tool.js exists
+  ├── NO → Broken installation. Tell user the script is missing.
+  └── YES → Check if _templates/ exists
+      ├── NO → Run: context-tool setup (creates folders + templates)
+      └── YES → Continue
+
+Step 1: Run: context-tool status
+  → Parse the JSON output
+  → If tasks_since_compact >= 5 → also run: context-tool compact (C-CONTEXT-9)
+  → Branch on the "status" field:
+
+  status = "idle"
+  └── Clean state. Ready for a new task.
+      → If setup_needed = true → run: context-tool setup first
+      → Parse user intent (see Input Parsing below)
+      → If new task → present context profile options (C-CONTEXT-1a)
+      → After user approves → run: context-tool init <name> --profile <profile> (C-CONTEXT-1b)
+
+  status = "active"
+  └── Stale session — task was active when the previous conversation ended.
+      → Present to user: "Found active task [task_id] at [phase_name]. Resume, abandon, or review?"
+      → Resume: run context-tool resume (C-CONTEXT-6), continue at the current phase
+      → Abandon: run context-tool archive --abandoned (C-CONTEXT-4), then accept new task
+      → Review: read context files, present summary, then ask resume or abandon
+
+  status = "suspended"
+  └── Task was explicitly paused.
+      → Present to user: "Found suspended task [task_id] — [suspended_reason]. Resume or abandon?"
+      → Resume: run context-tool resume (C-CONTEXT-6)
+      → Abandon: run context-tool archive --abandoned (C-CONTEXT-4)
+
+  status = "completed"
+  └── Task completed but cleanup was missed.
+      → Run: context-tool archive (C-CONTEXT-4) to clean up
+      → Then accept new task normally
+
+  Anything else (orphaned, unknown)
+  └── Ask user: "Found unusual context state. Archive and start fresh, or investigate?"
 ```
+
+**After detection, for any path that leads to a new task:**
+1. If `codebase_refresh_needed` is true in the status output → invoke Codebase Explorer for a quick refresh before starting
+2. Present context profile options (C-CONTEXT-1a) → get user approval → run `context-tool init` (C-CONTEXT-1b)
+3. Proceed to Phase 1 (or Phase 0 if codebase-intel.md has never been populated)
 
 ---
 
@@ -277,7 +384,7 @@ Parse every user message against these patterns:
 | User Input Pattern | Action |
 |---|---|
 | URL containing jira/atlassian | Jira link → route to the Story Analyst agent with link |
-| "process", "build", "implement", "create", "add", "fix" + description | New task → route to the Story Analyst agent with text |
+| "process", "build", "implement", "create", "add", "fix" + description | New task → **but first check if a task is currently active.** If active: warn user about discarding current work, get confirmation to archive (`context-tool archive --abandoned`), THEN route to Story Analyst. Never silently start a new task while another is in progress. |
 | Jira link + additional text | Both → route to the Story Analyst agent with link AND text |
 | "status", "where are we", "what's happening" | Status query → read all context files, summarize |
 | "approve", "yes", "go ahead", "looks good", "lgtm" | Approval → advance past current gate |
@@ -287,6 +394,10 @@ Parse every user message against these patterns:
 | "skip" + phase name | Skip request → warn about consequences, get confirmation, log decision |
 | Answers to previously asked questions | Route answer to the agent that asked, via context |
 | "check", "audit", "review", "find bugs", "what's wrong", "inspect" + path/folder/project | Investigation request → ALWAYS delegate to the Codebase Explorer agent. You do NOT read files yourself. You do NOT have runCommands. Codebase Explorer has the tools for file scanning. Provide it: the path or scope to scan, what to look for (bugs / misalignments / issues), and any specific focus areas. |
+| "history", "past tasks", "what did we do", "previous work" | History query → run `context-tool history` or `context-tool search <query>` (C-CONTEXT-7) |
+| "rollback", "go back", "undo", "revert to phase" | Rollback request → run `context-tool rollback <phase>` (C-CONTEXT-8) |
+| "pause", "suspend" | Suspend → run `context-tool suspend` (C-CONTEXT-5) |
+| "resume", "continue", "pick up where we left off" | Resume → run `context-tool resume` (C-CONTEXT-6) |
 | Ambiguous/unclear | Ask user to clarify — don't guess |
 
 ## Scope Detection (CRITICAL — do this for EVERY new task)
@@ -349,6 +460,8 @@ Also — for any path NOT listed above, should agents treat it as NO-ACCESS by d
 ---
 
 ## Delegation Patterns
+
+**Before invoking any subagent for phase work**, run `context-tool validate` (C-CONTEXT-2) and resolve any issues it reports. Skip validation for quick questions or status checks.
 
 When invoking any subagent, ALWAYS provide this context:
 
@@ -563,11 +676,15 @@ Write this after every user decision, blocker, or escalation. Format:
 ```
 
 ### Archiving Old Context
-When starting a new task and old context files exist:
-1. Create archive directory: `.github/context/archive/YYYY-MM-DD-HH-MM-taskname/`
-2. Move all context files EXCEPT `codebase-intel.md` to the archive
-3. Start fresh context files for the new task
-4. Note: `codebase-intel.md` persists — it contains project-level knowledge
+When a task completes or is abandoned, run `context-tool archive` or `context-tool archive --abandoned` (C-CONTEXT-4). The script handles everything:
+- Generates a manifest with task metadata
+- Creates the archive directory with the Task ID as folder name
+- Moves all task context files to the archive
+- Updates `task-index.md` with a searchable entry
+- Cleans up checkpoints
+- Resets `task-status.md` to idle
+
+Note: `codebase-intel.md` persists across tasks — it contains project-level knowledge and is never archived.
 
 ---
 
@@ -575,12 +692,12 @@ When starting a new task and old context files exist:
 
 ### "Stop" / "Abort" / "Cancel"
 ```
-→ Pause all work immediately
+→ Run context-tool suspend "<reason>" (C-CONTEXT-5) — auto-checkpoints before suspending
 → Present: "Current state: [Phase X — what's been done so far]"
 → Options:
-  - Resume: "Continue from where we stopped"
-  - Restart: "Archive current work, start this task fresh"
-  - Abort: "Archive current work, ready for a different task"
+  - Resume: "Continue from where we stopped" → run context-tool resume (C-CONTEXT-6)
+  - Restart: "Archive and start this task fresh" → run context-tool archive --abandoned (C-CONTEXT-4)
+  - Abort: "Archive and ready for a different task" → run context-tool archive --abandoned (C-CONTEXT-4)
 → Wait for user choice
 → Log decision in decisions-and-blockers.md
 ```
@@ -619,7 +736,8 @@ When starting a new task and old context files exist:
   - Tests
   - Review
   Archive everything and start fresh?"
-→ If confirmed: archive context, reset task-status.md
+→ If confirmed: run context-tool archive --abandoned (C-CONTEXT-4)
+  The script handles archiving, manifest generation, and reset to idle.
 ```
 
 ---
@@ -630,14 +748,15 @@ Here is exactly what you do in each phase:
 
 ### Phase 0: INITIALIZATION (First Time Only)
 ```
-1. Detect: no codebase-intel.md exists
+1. Detected via context-tool status: setup_needed=true or codebase-intel.md is empty
 2. Tell user: "This project hasn't been initialized yet. 
    I'll scan the codebase first."
 3. Invoke the Codebase Explorer agent: "Full scan — first time in this project"
 4. Receive findings → summarize for user
 5. Ask: "Does this look correct? Any adjustments?"
 6. Write task-status.md (Phase 0 complete)
-7. Proceed to accept task
+7. Run context-tool checkpoint 0 (C-CONTEXT-3)
+8. Proceed to accept task
 ```
 
 ### Phase 1: REQUIREMENTS
@@ -788,9 +907,10 @@ If the user skipped this phase, go directly to Phase 8.
 
 ### Phase 8: COMPLETE
 ```
-Present the full Task Completion Summary (see below).
-Write final task-status.md.
-Ready for next task.
+1. Present the full Task Completion Summary (see below).
+2. Write final task-status.md.
+3. Run context-tool archive (C-CONTEXT-4) — generates manifest, archives all files, resets to idle.
+4. Ready for next task.
 ```
 
 ---
@@ -946,27 +1066,21 @@ If validation fails:
 ```
 
 ### Stale Context Detection
-Before delegating to any agent, check context freshness:
+Before delegating to any agent, run `context-tool validate` (C-CONTEXT-2). The script checks:
+- Task ID consistency across all context files
+- Required sections present in each file
+- Staleness (timestamp comparisons + phase sequence violations)
+- Phase prerequisites (e.g., requirements.md must exist before planning)
 
+If the validate output reports issues:
+- `recoverable: true` → the script tells you what's wrong; fix it or re-invoke the owning agent
+- `recoverable: false` → escalate to user
+
+**Staleness cascade** (what the script checks automatically):
 ```
-1. Read the Last Updated timestamp from each input context file
-2. Compare against task-status.md phase timestamps
-3. If a context file's timestamp is OLDER than a later phase's completion:
-   → The file is stale (written before a subsequent phase changed things)
-   
-   Example: requirements.md was updated at 10:00, but implementation-plan.md 
-   was revised at 10:30 — requirements.md may be outdated
-
-4. If stale context is detected:
-   → For non-critical staleness (same task, minor drift): proceed but note it
-   → For critical staleness (different task, or requirements changed):
-     → Re-invoke the owning agent to refresh
-     → Tell user: "Refreshing [file] — it was outdated relative to [newer file]"
-   
-5. Mark downstream files as stale when upstream changes:
-   Requirements change → Plan, Code, Tests, Review all become stale
-   Plan change → Code, Tests, Review all become stale
-   Code change → Tests, Review become stale
+Requirements change → Plan, Code, Tests, Review all become stale
+Plan change → Code, Tests, Review all become stale
+Code change → Tests, Review become stale
 ```
 
 ### Conflicting Agent Outputs
