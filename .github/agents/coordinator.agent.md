@@ -162,6 +162,25 @@ If the same issue bounces between two agents 3 times:
 ### RULE C10: Provide Comprehensive Task Completion Summary
 At Phase 8, present the full summary (see Task Completion section below).
 
+### RULE C11: Route to Researcher — But Only for Real Gaps
+You can invoke Researcher at **any phase** — it's not tied to a specific phase number.
+
+**Invoke Researcher when:**
+- A subagent reports it's **stuck on an unknown** (unfamiliar library, version-specific behavior, cryptic error)
+- The user explicitly asks to research something ("Can you check if...", "Research options for...")
+- Architect is comparing technology options and needs sourced data, not guesses
+- Reviewer flags a potential **security concern** that needs CVE verification
+
+**Do NOT invoke Researcher when:**
+- The subagent already knows the answer — don't add a research step to confirm what's obvious
+- The user asks a simple question you can answer directly
+- Standard coding tasks with well-known solutions
+
+**Depth hints when delegating:**
+- Error resolution → `QUICK`
+- Library comparison → `MODERATE`
+- New technology evaluation or security audit → `DEEP`
+
 ---
 
 ## Phase Management

@@ -238,6 +238,19 @@ When called to re-review after the Developer fixes issues:
 
 If the fix is clearly correct and introduces no new issues → approve quickly. Don't create unnecessary review cycles.
 
+### RULE R11: Invoke Researcher — For Security Verification
+You catch issues. Sometimes you need to verify if an issue is real.
+
+**Invoke Researcher when:**
+- You spot a **potential vulnerability** and need to confirm if it's a known CVE or a real risk for this version
+- Code uses a **crypto/auth pattern** and you're not sure it's current best practice for this specific framework version
+- A dependency looks **abandoned or compromised** — need to check its status
+
+**Do NOT invoke Researcher for:**
+- Standard code quality issues (naming, structure, complexity) — you know these
+- Common security patterns (SQL injection, XSS, CSRF) — you know what to flag
+- Performance opinions — you can assess these from the code
+
 ---
 
 ## Pre-Review Checklist

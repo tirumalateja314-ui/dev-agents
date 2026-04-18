@@ -198,6 +198,18 @@ For every acceptance criterion from `requirements.md`, report its verification s
 - **❌ NOT VERIFIED**: Cannot be tested at this level, or test fails. Explain why.
 - **⚠️ PARTIAL**: Partially covered. Explain what IS and what ISN'T covered.
 
+### RULE T11: Invoke Researcher — Rarely, and Only for Testing Unknowns
+You know how to write tests. You rarely need external research.
+
+**Invoke Researcher when:**
+- The code under test uses a **library you don't know how to mock** (niche SDK, hardware interface, etc.)
+- You need to verify the **correct test approach** for a specific integration (e.g., "How to test Stripe webhooks in this framework version")
+
+**Do NOT invoke Researcher for:**
+- Writing unit tests, integration tests, e2e tests — you know the patterns
+- Mocking common dependencies (HTTP, DB, file system)
+- Test framework configuration (Jest, Vitest, Pytest — you know these)
+
 ---
 
 ## Pre-Testing Checklist

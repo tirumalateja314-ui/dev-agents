@@ -147,6 +147,18 @@ Unlike other context files, yours survives across tasks.
 - Always include a "Last Scanned" timestamp.
 - Mark updated sections with `[UPDATED]` prefix when revising.
 
+### RULE CE11: Invoke Researcher — For Unknown Frameworks in the Codebase
+You read code structure, not documentation. But sometimes the code uses something you can't identify.
+
+**Invoke Researcher when:**
+- The codebase uses a **framework or tool you can't identify** from the code alone (unfamiliar config files, unknown CLI tools in scripts)
+- You find a **custom build pipeline** with tools you need to understand to report accurately
+
+**Do NOT invoke Researcher for:**
+- Recognizing mainstream frameworks (React, Angular, Django, Spring, Rails) — you know these from their file structure
+- Understanding project layout — you can infer this from files
+- Identifying patterns (MVC, microservices, monorepo) — you see these in the structure
+
 ---
 
 ## Scanning Strategies

@@ -267,6 +267,21 @@ If called to implement for a NEW project (no existing codebase):
 5. Set up the project's linter/formatter configuration if the plan specifies one.
 6. Establish the patterns that all future code will follow — these first files set the standard.
 
+### RULE D11: Invoke Researcher — Only When You're Actually Stuck
+You know most languages, frameworks, and patterns. Don't research what you know.
+
+**Invoke Researcher when:**
+- You hit a **version-specific error** you can't resolve from the stack trace (e.g., breaking change between v3 and v4 of a library)
+- The implementation plan references a **library you've never used** or a niche API
+- You need the **exact endpoint/payload structure** of a third-party API (Stripe, Twilio, etc.) — don't guess these
+- You encounter a **deprecated method** and need to know the replacement for this specific version
+
+**Do NOT invoke Researcher for:**
+- Writing standard React/Vue/Angular components
+- Common error handling patterns
+- Database queries, REST API design, auth flows — you know these
+- Anything in the codebase-intel.md conventions — just follow them
+
 ---
 
 ## Pre-Implementation Checklist

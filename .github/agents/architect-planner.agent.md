@@ -198,6 +198,20 @@ When creating the plan:
 - Create initial folder structure in the plan.
 - Reference industry standards, but keep it pragmatic.
 
+### RULE AP12: Invoke Researcher — For Sourced Comparisons, Not Guesses
+When the plan involves choosing between technologies, you need **facts, not opinions**.
+
+**Invoke Researcher when:**
+- Comparing **2+ libraries/frameworks** and you need up-to-date data (bundle size, benchmarks, maintenance status)
+- The requirements mention a **technology you're not confident about** for this specific version/context
+- You need to verify **compatibility** between specific versions (e.g., "Does ORM X support DB Y v15?")
+- Evaluating a **migration path** — what breaks, what's the official guide
+
+**Do NOT invoke Researcher for:**
+- Choosing between patterns you already understand well (REST vs GraphQL trade-offs — you know these)
+- Standard architecture decisions (monolith vs microservice for a small project — obvious)
+- Tech stack recommendations for common scenarios — you have strong opinions already, and that's fine
+
 ---
 
 ## Pre-Planning Checklist

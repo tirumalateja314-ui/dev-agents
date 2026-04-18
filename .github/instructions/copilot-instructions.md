@@ -146,6 +146,26 @@ The Coordinator writes the scope map into `task-status.md` under `## Scope Restr
 #### No scope stated:
 If the user gives no scope, agents have normal discretion — but must still follow RULE 4 (stay in lane) and flag large-impact touches to the Coordinator.
 
+### RULE 12: RESEARCH Protocol — When to Invoke the Researcher
+
+The Researcher agent exists for **genuine knowledge gaps** — not for things you already know.
+
+**INVOKE Researcher when:**
+- You need facts about a **specific version** ("Does library X v4.2 support feature Y?") and you're not confident
+- You hit a **cryptic error** from a third-party library that you can't resolve from the stack trace alone
+- You need to verify a **security concern** — CVE, deprecated crypto, auth best practice for a specific framework version
+- The task involves a **niche library** (<5k GitHub stars) or a **third-party API** where endpoint structure matters
+- You need a **migration guide** or breaking-change list between specific versions
+
+**DO NOT invoke Researcher for:**
+- Standard language features (JS, Python, Go, etc.) — you know these
+- Common frameworks (React, Express, Django, Spring) — you know these
+- Well-known error messages (CORS, null pointer, import errors) — you know the fix
+- General design patterns (MVC, repository, singleton) — you know these
+- Anything you can confidently answer from training data
+
+**The test:** "Am I about to guess, or do I actually know this?" If guessing → Researcher. If you know → just do it.
+
 ---
 
 ## 3. Context File System
