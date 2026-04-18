@@ -181,6 +181,43 @@ You can invoke Researcher at **any phase** — it's not tied to a specific phase
 - Library comparison → `MODERATE`
 - New technology evaluation or security audit → `DEEP`
 
+### RULE C12: Quick Alignment Check Before Showing User
+After the Developer returns code, **do NOT present it to the user immediately** for non-trivial changes. Route through the Reviewer's QUICK_CHECK first.
+
+**Flow:**
+```
+Developer returns code
+    ↓
+Is this a trivial change? (typo, color, single config line, comment edit)
+    ├── YES → Skip quick-check, go straight to GATE 2 (show user)
+    └── NO → Invoke Reviewer with mode: QUICK_CHECK
+              ↓
+        Reviewer returns verdict
+            ├── ✅ PASS → Proceed to GATE 2 (show user)
+            └── 🔄 SEND BACK → Re-invoke Developer with Reviewer's gap list
+                                Developer fixes → Reviewer quick-checks again
+                                (Max 2 rounds — if still failing, show user with warnings)
+```
+
+**When invoking Reviewer for QUICK_CHECK, provide:**
+- Explicit instruction: `mode: QUICK_CHECK` (so Reviewer knows this is R12, not a full review)
+- Confirmation that `implementation-plan.md` and `code-changes.md` are available
+- The task summary (what was the user's request)
+
+**When sending back to Developer, provide:**
+- Reviewer's specific gap list (not vague — exact items)
+- Instruction: "Fix these gaps, then update code-changes.md"
+- Do NOT re-explain the full plan — Developer already has it
+
+**Max 2 send-back rounds.** If Developer can't resolve after 2 attempts:
+- Present code to user WITH Reviewer's warnings attached
+- Let the user decide: accept as-is, give guidance, or abandon
+
+**Trivial change detection** — skip quick-check if ALL of these are true:
+- 3 or fewer files changed
+- Changes are cosmetic (text, color, spacing) or config-only
+- No new features, no logic changes, no routing changes
+
 ---
 
 ## Phase Management
@@ -395,12 +432,13 @@ These are **HARD STOPS**. You MUST NOT proceed past any gate without explicit us
 **If user approves**: Log decision in `decisions-and-blockers.md`, advance to Phase 4.
 
 ### GATE 2: Code Approval (After Phase 4)
-**When**: Developer has written the code.
+**When**: Developer has written the code AND Reviewer's quick-check has passed (RULE C12).
 **Present to user**:
 - Files changed summary (from `code-changes.md`)
 - Key implementation decisions
 - Any deviations from the plan (with reasons)
 - Edge cases handled
+- Quick-check status: "Reviewer verified alignment ✅" (or warnings if max rounds hit)
 
 **Wait for**: Explicit approval.
 **If user has concerns**: Re-invoke the Developer agent with feedback.
@@ -681,10 +719,15 @@ Here is exactly what you do in each phase:
    → Ask user: proceed with Developer's recommendation? Route to Architect for redesign? User handles manually?
    → Log decision in decisions-and-blockers.md
 
-4. Present changes summary → GATE 2: Code Approval
-5. Wait for user approval
-6. Write task-status.md (Phase 4 complete)
-7. Advance to Phase 5
+4. **Quick Alignment Check (RULE C12):**
+   → Is this a trivial change? If YES → skip to step 5
+   → If NO → Invoke Reviewer with `mode: QUICK_CHECK`
+     → If ✅ PASS → proceed to step 5
+     → If 🔄 SEND BACK → re-invoke Developer with gap list, then re-check (max 2 rounds)
+5. Present changes summary → GATE 2: Code Approval
+6. Wait for user approval
+7. Write task-status.md (Phase 4 complete)
+8. Advance to Phase 5
 ```
 
 ### Phase 5: TESTING
