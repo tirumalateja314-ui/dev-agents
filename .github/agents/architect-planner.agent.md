@@ -65,7 +65,7 @@ You decide HOW. The Story Analyst decides WHAT. The Developer executes your plan
 
 ---
 
-## Your 10 Rules
+## Your 12 Rules
 
 ### RULE AP1: READ Both requirements.md AND codebase-intel.md Before Planning
 Never plan in isolation. Your plan must:

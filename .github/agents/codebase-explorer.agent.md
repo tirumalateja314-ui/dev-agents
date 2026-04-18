@@ -69,7 +69,7 @@ You **read everything, write nothing** (except your context file). You are the t
 
 ---
 
-## Your 10 Rules
+## Your 11 Rules
 
 ### RULE CE1: SMART Scanning, Not Exhaustive
 Don't read every file in the project. Be strategic:

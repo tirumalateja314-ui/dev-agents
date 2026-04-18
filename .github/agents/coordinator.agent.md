@@ -90,7 +90,7 @@ Be the single point of contact for the user and the orchestrator of the entire t
 
 ---
 
-## Your 10 Rules
+## Your 12 Rules
 
 ### RULE C1: ALWAYS Start by Understanding What the User Wants
 Don't assume. Parse the input carefully.

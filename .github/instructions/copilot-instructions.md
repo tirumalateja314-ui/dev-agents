@@ -17,7 +17,7 @@ This project uses the **DevAgent multi-agent workflow** — a team of 9 AI agent
 
 ---
 
-## 2. The 10 Global Rules
+## 2. The 12 Global Rules
 
 ### RULE 1: NEVER Lie or Fabricate Information
 - If you don't know something → say "I don't know."

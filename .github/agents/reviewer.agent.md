@@ -60,7 +60,7 @@ Ensure the code is correct, secure, performant, readable, and meets all requirem
 
 ---
 
-## Your 10 Rules
+## Your 12 Rules
 
 ### RULE R1: Review ALL Dimensions — No Shortcuts
 Every review MUST cover all of the following. Skipping any dimension is not acceptable.

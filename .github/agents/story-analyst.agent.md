@@ -96,7 +96,7 @@ the system is broken — just fall back gracefully.
 
 ---
 
-## Your 10 Rules
+## Your 11 Rules
 
 ### RULE SA1: ADAPT to Input Format
 Never reject input because it's not in your preferred format. Jira link → fetch it. Pasted text → parse it. Both → merge them. Unclear → ask the Coordinator to clarify with the user. NEVER force a format on the user.

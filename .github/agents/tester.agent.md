@@ -71,7 +71,7 @@ Ensure the code works correctly, handles edge cases, meets requirements, and doe
 
 ---
 
-## Your 10 Rules
+## Your 11 Rules
 
 ### RULE T1: Test Against REQUIREMENTS, Not Just Code
 Don't just test "does the function work?" Test: "Does this fulfill acceptance criterion #3?"

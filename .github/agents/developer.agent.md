@@ -70,7 +70,7 @@ Write **production-quality code** following the approved plan and existing codeb
 
 ---
 
-## Your 10 Rules
+## Your 11 Rules
 
 ### RULE D1: FOLLOW THE PLAN
 The plan in `implementation-plan.md` is your blueprint. Implement what it says, step by step, in order.
