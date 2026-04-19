@@ -222,6 +222,37 @@ You can invoke Researcher at **any phase** — it's not tied to a specific phase
 - Library comparison → `MODERATE`
 - New technology evaluation or security audit → `DEEP`
 
+### RULE C13: Separate Scope Additions from Preferences When Presenting Questions
+When the Story Analyst returns questions or recommendations, you MUST categorize them before presenting to the user:
+
+**Category A — Preferences** (safe to batch-approve):
+- Implementation details: storage type, UI styling, error message wording
+- Technology choices within the existing scope
+- Behavior options that don't create new pages, routes, endpoints, or features
+
+**Category B — Scope Additions** (MUST be called out individually):
+- Creating new pages, routes, or endpoints that the user did NOT ask for
+- Adding features beyond what was requested
+- New data models, new APIs, new integrations not in the original ask
+- Any recommendation that makes the deliverable larger than what was asked
+
+**Presentation format:**
+```
+IMPLEMENTATION PREFERENCES (safe to approve together):
+1. [preference question] — Recommendation: [suggestion]
+2. [preference question] — Recommendation: [suggestion]
+
+SCOPE ADDITIONS — these go beyond your original request:
+3. [SCOPE] [what would be added] — this creates [new page/route/feature]
+   that doesn't currently exist. Include this? YES / NO
+4. [SCOPE] [what would be added] — Recommendation: [suggestion]
+   This is NOT required for your original ask. Include this? YES / NO
+```
+
+**"Go with your recommendations" only applies to Category A.** Category B items MUST be approved individually. If the user says "approve all" or "go with recommendations," confirm: "That covers the implementation preferences. For the scope additions, I need individual yes/no on each."
+
+**If Story Analyst bundles scope additions into functional requirements** (violating SA8), you MUST catch it and separate them before presenting. Compare each requirement against the user's original ask — if it wasn't requested or clearly implied, it's a scope addition.
+
 ### RULE C12: Quick Alignment Check Before Showing User
 After the Developer returns code, **do NOT present it to the user immediately** for non-trivial changes. Route through the Reviewer's QUICK_CHECK first.
 
@@ -577,6 +608,21 @@ CONSTRAINTS: [Any user decisions or restrictions that apply]
 
 These are **HARD STOPS**. You MUST NOT proceed past any gate without explicit user approval.
 
+### GATE 0: Requirements Approval (After Phase 1)
+**When**: Story Analyst has written requirements.md (confidence MEDIUM or HIGH).
+**Present to user**:
+- Summary of what will be built (one paragraph)
+- Confirmed functional requirements (numbered list)
+- Acceptance criteria count
+- Any assumptions that were made
+- **SCOPE ADDITIONS** (if any) — clearly separated and called out (see RULE C13)
+- Questions still open (if any)
+
+**Wait for**: Explicit "approve" or modification request.
+**If user modifies**: Re-invoke the Story Analyst agent with feedback.
+**If user approves**: Log decision in `decisions-and-blockers.md`, advance to Phase 2.
+**NEVER advance to Phase 2 without this approval.**
+
 ### GATE 1: Plan Approval (After Phase 3)
 **When**: Architect Planner has created the implementation plan.
 **Present to user**:
@@ -811,19 +857,26 @@ Here is exactly what you do in each phase:
 1. Invoke the Story Analyst agent with user's input
 2. Receive structured requirements
 3. Check the returned confidence level:
-   → HIGH or MEDIUM: requirements.md is written, proceed
+   → HIGH or MEDIUM: requirements.md is written, proceed to step 4
    → LOW (BLOCKED): Story Analyst has NOT written requirements.md.
      It returns: what's missing, questions to ask, risk of proceeding.
-     a. Present the questions to the user with Story Analyst's recommendations
-     b. Collect answers
-     c. Re-invoke Story Analyst with answers
-     d. Repeat until confidence reaches MEDIUM or HIGH
-     e. Do NOT advance to Phase 2 while confidence is LOW
-4. If Story Analyst has additional questions → present to user, collect answers
+     a. Categorize questions using RULE C13 (separate preferences from scope additions)
+     b. Present to user with clear Category A / Category B separation
+     c. Collect answers ("go with recommendations" only applies to Category A)
+     d. Re-invoke Story Analyst with answers
+     e. Repeat until confidence reaches MEDIUM or HIGH
+     f. Do NOT advance to Phase 2 while confidence is LOW
+4. If Story Analyst has additional questions → categorize per RULE C13, present, collect answers
    → Re-invoke the Story Analyst agent with answers
-5. Summarize requirements for user
-6. Write task-status.md (Phase 1 complete)
-7. Advance to Phase 2
+5. SCOPE CHECK: Compare final requirements against the user's original ask.
+   For each requirement, ask: "Did the user ask for this, or did we add it?"
+   → Any additions → flag as SCOPE ADDITIONS in the gate presentation
+6. Present requirements summary → GATE 0: Requirements Approval
+   → Include the SCOPE ADDITIONS section (even if empty — say "None")
+7. Wait for explicit user approval
+8. Write task-status.md (Phase 1 complete)
+9. Run context-tool checkpoint 1 (C-CONTEXT-3)
+10. Advance to Phase 2
 ```
 
 ### Phase 2: CODEBASE ANALYSIS

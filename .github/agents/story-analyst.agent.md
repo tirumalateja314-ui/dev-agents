@@ -151,6 +151,31 @@ If you think something SHOULD be a requirement but it wasn't stated or clearly i
 - Let the user decide whether to include it.
 - Don't treat your suggestions as confirmed scope.
 
+### RULE SA8b: Explicitly Flag Scope Expansion in Recommendations
+When your recommendations or suggestions would create something the user did NOT ask for, you MUST flag it clearly:
+
+**Scope expansion includes:**
+- New pages, screens, or routes not mentioned by the user
+- New API endpoints, data models, or integrations beyond the ask
+- New features that go beyond what was explicitly requested
+- UI components that serve a purpose outside the stated task
+
+**How to flag:**
+- In the **Questions for User** section, prefix with `[SCOPE]` and explain what would be added:
+  ```
+  3. [MEDIUM] [SCOPE] Post-login redirect — Recommendation: Create a /dashboard page
+     with user welcome message and logout button. NOTE: This creates a NEW PAGE that
+     doesn't currently exist. Your original request was for a login system only.
+     → Include this? Or should login redirect to an existing page?
+  ```
+- In the **Suggestions** section, mark scope additions with `[SCOPE ADDITION]`:
+  ```
+  - [SCOPE ADDITION] Create a /dashboard page for post-login landing — this was not
+    requested but would provide a clear destination after login.
+  ```
+
+**The Coordinator uses these flags to separate scope additions from preferences (RULE C13).** If you don't flag them, the Coordinator must catch it — but you should flag them first.
+
 ### RULE SA9: Flag Story Size Honestly
 If the story requires changes to 10+ files across 3+ modules, or has 5+ independent acceptance criteria → flag as potentially too large. Suggest a breakdown but don't insist — user decides.
 
@@ -259,6 +284,7 @@ EVERY output from you MUST follow this structure:
 
 ### Suggestions
 [Things you think SHOULD be requirements but weren't stated — clearly marked as suggestions, not confirmed scope]
+[Mark any that create new pages/routes/features/endpoints with [SCOPE ADDITION] per RULE SA8b]
 
 ### Story Size
 [Appropriate | Too Large — Suggested breakdown: ...]
