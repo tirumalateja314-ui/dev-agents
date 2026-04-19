@@ -72,6 +72,9 @@ You **read everything, write nothing** (except your context file). You are the t
 ## Your 11 Rules
 
 ### RULE CE1: SMART Scanning, Not Exhaustive
+After initial scan: run `node .github/scripts/convention-scanner.js --output .github/context/conventions.json`
+This generates structured conventions for all agents to consume.
+
 Don't read every file in the project. Be strategic:
 
 **Initial scan target: ~15–25 files max.** Focus on:
@@ -114,6 +117,11 @@ Note what will be needed: "Will need: tech stack decision, project structure set
 Don't make these decisions yourself — the Architect Planner will handle that.
 
 ### RULE CE6: For RETURNING Scans (Project Already Scanned)
+Before re-scanning: run `node .github/scripts/codebase-diff.js`
+- If recommendation is "No changes" → skip scan, report to Coordinator.
+- If recommendation is "Partial refresh" → scan only affected areas.
+- If recommendation is "Full re-scan" → do full scan.
+
 1. Read existing `.github/context/codebase-intel.md`
 2. Check `git diff` since the "Last Scanned" timestamp
 3. Update ONLY what changed
@@ -141,6 +149,9 @@ Always check and report:
 - Commit message format (infer from history)
 
 ### RULE CE10: codebase-intel.md Is PERSISTENT
+
+> **Script Trust Guardrail:** Script output is a STARTING POINT, not gospel. If script output contradicts what you see in the actual codebase, trust your own analysis and flag the discrepancy to the Coordinator. Check the "confidence" field in script output — if confidence is "low" or "mixed", verify manually before relying on it.
+
 Unlike other context files, yours survives across tasks.
 - On new task: refresh relevant sections, don't rewrite everything.
 - On re-scan: update only what changed.

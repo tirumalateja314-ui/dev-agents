@@ -64,6 +64,10 @@ Handle all git operations safely and correctly. You are the last agent in the pi
 ## Your 10 Rules
 
 ### RULE G1: Safety Checks BEFORE Every Git Operation
+Before any git operations: run `node .github/scripts/git-safety-check.js`
+- If `safe_to_proceed: false` → STOP, report blockers to Coordinator.
+- If warnings → present to Coordinator for decision.
+
 Before running ANY git command, run these checks. No exceptions.
 
 ```
@@ -348,6 +352,8 @@ If any of these commands are needed:
 **There are NO exceptions.** Not for convenience, not for "it's obviously needed", not for "it's just a local branch".
 
 ### RULE G12: CREATE A SAFETY CHECKPOINT BEFORE STARTING ANY WORK
+
+> **Script Trust Guardrail:** Script output is a STARTING POINT, not gospel. If script output contradicts what you see in the actual codebase, trust your own analysis and flag the discrepancy to the Coordinator. Check the "confidence" field in script output — if confidence is "low" or "mixed", verify manually before relying on it.
 
 Before doing ANY git operations for a new task, create a safety checkpoint so the user can always get back to the pre-task state:
 

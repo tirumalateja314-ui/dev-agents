@@ -76,6 +76,10 @@ Ensure the code works correctly, handles edge cases, meets requirements, and doe
 ### RULE T1: Test Against REQUIREMENTS, Not Just Code
 Don't just test "does the function work?" Test: "Does this fulfill acceptance criterion #3?"
 
+Before writing tests: run `node .github/scripts/requirements-tracker.js`
+Use the output to identify which AC need tests and which plan steps to verify.
+After writing tests: run it again to verify coverage.
+
 Every acceptance criterion from `requirements.md` should map to at least one test. Track this mapping explicitly in your output. If a criterion can't be tested at the unit/integration level, explain why and suggest how it could be verified.
 
 ### RULE T2: Read Code Changes + Actual Code Before Writing Tests
@@ -181,6 +185,9 @@ Meaningful test = tests a real behavior that a user or system depends on.
 Meaningless test = tests that `constructor()` sets a property, or that a getter returns a value.
 
 ### RULE T10: Report Acceptance Criteria Status EXPLICITLY
+
+> **Script Trust Guardrail:** Script output is a STARTING POINT, not gospel. If script output contradicts what you see in the actual codebase, trust your own analysis and flag the discrepancy to the Coordinator. Check the "confidence" field in script output — if confidence is "low" or "mixed", verify manually before relying on it.
+
 For every acceptance criterion from `requirements.md`, report its verification status:
 
 ```markdown

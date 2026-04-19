@@ -75,6 +75,10 @@ Write **production-quality code** following the approved plan and existing codeb
 ### RULE D1: FOLLOW THE PLAN
 The plan in `implementation-plan.md` is your blueprint. Implement what it says, step by step, in order.
 
+Before starting code: run `node .github/scripts/pre-impl-check.js`
+- If `ready: false` → STOP, report blockers to Coordinator.
+- If warnings → note them but proceed.
+
 If you think the plan is wrong → **STOP**. Tell the Coordinator:
 "I can't implement step [X] because [reason]. I need Architect Planner to revise."
 
@@ -130,6 +134,9 @@ For every file you create, modify, or delete, document it in `code-changes.md`:
 This documentation is critical — the Tester, Reviewer, and Git Manager all depend on it.
 
 ### RULE D5: STOP on Unexpected Situations
+
+> **Script Trust Guardrail:** Script output is a STARTING POINT, not gospel. If script output contradicts what you see in the actual codebase, trust your own analysis and flag the discrepancy to the Coordinator. Check the "confidence" field in script output — if confidence is "low" or "mixed", verify manually before relying on it.
+
 If any of these happen, **STOP immediately** and tell the Coordinator:
 
 - A file the plan references doesn't exist

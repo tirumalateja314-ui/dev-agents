@@ -9,10 +9,10 @@
  * Usage: node .github/scripts/integration-test.js
  */
 
-const { execSync } = require('child_process');
-const fs = require('fs');
-const path = require('path');
-const os = require('os');
+const { execSync } = require('node:child_process');
+const fs = require('node:fs');
+const path = require('node:path');
+const os = require('node:os');
 
 // ─────────────────────────────────────────────────────────
 // Test infrastructure
@@ -34,14 +34,14 @@ function setup() {
   const dst = path.join(TEST_DIR, '.github', 'scripts', 'context-tool.js');
   fs.copyFileSync(src, dst);
   TOOL = `node "${dst}"`;
-  console.log(`\n🧪 Test directory: ${TEST_DIR}\n`);
+  console.log(`\n[TEST] Test directory: ${TEST_DIR}\n`);
 }
 
 function teardown() {
   try {
     fs.rmSync(TEST_DIR, { recursive: true, force: true });
   } catch (e) {
-    console.log(`⚠️  Could not clean up: ${e.message}`);
+    console.log(`[WARN] Could not clean up: ${e.message}`);
   }
 }
 
@@ -71,8 +71,7 @@ function tryParse(str) {
   if (!str) return null;
   try {
     // Find the first { or [ in the output (skip any non-JSON lines)
-    const idx = str.search(/[{\[]/);
-    if (idx === -1) return null;
+    const idx = str.search(/[[{]/);    if (idx === -1) return null;
     return JSON.parse(str.slice(idx));
   } catch {
     return null;
@@ -82,10 +81,10 @@ function tryParse(str) {
 function assert(condition, testName, details) {
   if (condition) {
     PASS++;
-    console.log(`  ✅ ${testName}`);
+    console.log(`  [PASS] ${testName}`);
   } else {
     FAIL++;
-    const msg = `  ❌ ${testName}${details ? ' — ' + details : ''}`;
+    const msg = `  [FAIL] ${testName}${details ? ' — ' + details : ''}`;
     console.log(msg);
     FAILURES.push(msg);
   }
@@ -105,7 +104,7 @@ function testSetup() {
   // T1: Setup creates folder structure
   const r = run(`${TOOL} setup`);
   assert(r.ok, 'setup succeeds');
-  assert(r.parsed && r.parsed.ready === true, 'setup returns ready:true', JSON.stringify(r.parsed));
+  assert(r.parsed?.ready === true, 'setup returns ready:true', JSON.stringify(r.parsed));
 
   // T2: Verify directories exist
   const ctx = path.join(TEST_DIR, '.github', 'context');
@@ -143,7 +142,7 @@ function testInit() {
   // T7: Init with standard profile
   const r = run(`${TOOL} init fix-login-bug --profile standard`);
   assert(r.ok, 'init succeeds');
-  assert(r.parsed && r.parsed.initialized, 'init returns initialized (task_id)', JSON.stringify(r.parsed));
+  assert(r.parsed?.initialized, 'init returns initialized (task_id)', JSON.stringify(r.parsed));
 
   const taskId = r.parsed ? r.parsed.initialized : '';
 
@@ -159,7 +158,7 @@ function testInit() {
 
   // T10: Double init should fail (already active)
   const r2 = run(`${TOOL} init another-task`, true);
-  assert(r2.parsed && r2.parsed.error, 'double init fails with error', JSON.stringify(r2.parsed));
+  assert(r2.parsed?.error, 'double init fails with error', JSON.stringify(r2.parsed));
 
   return taskId;
 }
@@ -169,10 +168,10 @@ function testStatus(expectedStatus) {
 
   const r = run(`${TOOL} status`);
   assert(r.ok, 'status succeeds');
-  assert(r.parsed && r.parsed.status, 'status returns status field', JSON.stringify(r.parsed));
+  assert(r.parsed?.status, 'status returns status field', JSON.stringify(r.parsed));
 
   if (expectedStatus) {
-    assert(r.parsed && r.parsed.status === expectedStatus, `status shows "${expectedStatus}"`, r.parsed ? r.parsed.status : 'null');
+    assert(r.parsed?.status === expectedStatus, `status shows "${expectedStatus}"`, r.parsed?.status ?? 'null');
   }
 
   return r.parsed;
@@ -184,7 +183,7 @@ function testValidate() {
   // T: Validate on healthy active task
   const r = run(`${TOOL} validate`);
   assert(r.ok, 'validate succeeds on healthy task');
-  assert(r.parsed && r.parsed.valid !== undefined, 'validate returns valid field', JSON.stringify(r.parsed));
+  assert(r.parsed?.valid !== undefined, 'validate returns valid field', JSON.stringify(r.parsed));
 
   return r.parsed;
 }
@@ -194,7 +193,7 @@ function testCheckpoint(phase) {
 
   const r = run(`${TOOL} checkpoint ${phase}`);
   assert(r.ok, `checkpoint ${phase} succeeds`);
-  assert(r.parsed && r.parsed.checkpoint, `checkpoint ${phase} returns checkpoint field`, JSON.stringify(r.parsed));
+  assert(r.parsed?.checkpoint, `checkpoint ${phase} returns checkpoint field`, JSON.stringify(r.parsed));
 
   // Verify checkpoint directory exists
   const cpDir = path.join(TEST_DIR, '.github', 'context', 'checkpoints');
@@ -208,7 +207,7 @@ function testRollback(phase) {
 
   const r = run(`${TOOL} rollback ${phase}`);
   assert(r.ok, `rollback to ${phase} succeeds`);
-  assert(r.parsed && r.parsed.rolled_back_to, `rollback ${phase} returns rolled_back_to`, JSON.stringify(r.parsed));
+  assert(r.parsed?.rolled_back_to, `rollback ${phase} returns rolled_back_to`, JSON.stringify(r.parsed));
 }
 
 function testArchive(abandoned) {
@@ -217,7 +216,7 @@ function testArchive(abandoned) {
   const cmd = abandoned ? `${TOOL} archive --abandoned` : `${TOOL} archive`;
   const r = run(cmd);
   assert(r.ok, 'archive succeeds');
-  assert(r.parsed && r.parsed.archived, 'archive returns archived field', JSON.stringify(r.parsed));
+  assert(r.parsed?.archived, 'archive returns archived field', JSON.stringify(r.parsed));
 
   // Verify archive folder created
   const archiveDir = path.join(TEST_DIR, '.github', 'context', 'archive');
@@ -252,26 +251,26 @@ function testSuspendResume() {
   // Suspend
   const r1 = run(`${TOOL} suspend "user needs lunch break"`);
   assert(r1.ok, 'suspend succeeds');
-  assert(r1.parsed && r1.parsed.suspended, 'suspend returns suspended field', JSON.stringify(r1.parsed));
+  assert(r1.parsed?.suspended, 'suspend returns suspended field', JSON.stringify(r1.parsed));
 
   // Status shows suspended
   const s1 = run(`${TOOL} status`);
-  assert(s1.parsed && s1.parsed.status === 'suspended', 'status shows suspended after suspend', s1.parsed ? s1.parsed.status : 'null');
+  assert(s1.parsed?.status === 'suspended', 'status shows suspended after suspend', s1.parsed?.status ?? 'null');
 
   // Can't init while suspended
   const r2 = run(`${TOOL} init new-task`, true);
-  assert(r2.parsed && r2.parsed.error, 'init blocked while suspended');
+  assert(r2.parsed?.error, 'init blocked while suspended');
 
   section('Phase 6: RESUME');
 
   // Resume
   const r3 = run(`${TOOL} resume`);
   assert(r3.ok, 'resume succeeds');
-  assert(r3.parsed && r3.parsed.task_id, 'resume returns task_id', JSON.stringify(r3.parsed));
+  assert(r3.parsed?.task_id, 'resume returns task_id', JSON.stringify(r3.parsed));
 
   // Status shows active again
   const s2 = run(`${TOOL} status`);
-  assert(s2.parsed && s2.parsed.status === 'active', 'status shows active after resume', s2.parsed ? s2.parsed.status : 'null');
+  assert(s2.parsed?.status === 'active', 'status shows active after resume', s2.parsed?.status ?? 'null');
 }
 
 function testSearchHistory() {
@@ -285,14 +284,14 @@ function testSearchHistory() {
   // Search for non-existent term
   const r2 = run(`${TOOL} search zzz-nonexistent-xyz`);
   assert(r2.ok, 'search with no match succeeds');
-  assert(r2.parsed && r2.parsed.matches && r2.parsed.matches.length === 0, 'no results for bad query');
+  assert(r2.parsed?.matches?.length === 0, 'no results for bad query');
 
   section('Phase 5: HISTORY');
 
   const r3 = run(`${TOOL} history --last 5`);
   assert(r3.ok, 'history succeeds');
   assert(r3.parsed && Array.isArray(r3.parsed.tasks), 'history returns tasks array', JSON.stringify(r3.parsed));
-  assert(r3.parsed && r3.parsed.tasks.length > 0, 'history has at least 1 entry');
+  assert(r3.parsed?.tasks.length > 0, 'history has at least 1 entry');
 }
 
 function testCompact() {
@@ -307,53 +306,56 @@ function testCompact() {
 // Edge Case Tests
 // ─────────────────────────────────────────────────────────
 
-function testEdgeCases() {
+function testEdgeCasesInvalidCommands() {
   section('EDGE CASES: Invalid Commands');
 
   // Unknown command
   const r1 = run(`${TOOL} foobar`, true);
-  assert(r1.parsed && r1.parsed.error, 'unknown command returns error');
+  assert(r1.parsed?.error, 'unknown command returns error');
 
   // No command — may exit with usage text (not necessarily JSON)
-  const r2 = run(`${TOOL}`, true);
+  run(`${TOOL}`, true);
   assert(true, 'no command handled (exits with usage or error)');
+}
 
+function testEdgeCasesWrongState() {
   section('EDGE CASES: Operations on Wrong State');
 
   // Archive with no active task (should be idle after previous archive)
   const r3 = run(`${TOOL} archive`, true);
-  assert(r3.parsed && r3.parsed.error, 'archive on idle state fails', JSON.stringify(r3.parsed));
+  assert(r3.parsed?.error, 'archive on idle state fails', JSON.stringify(r3.parsed));
 
   // Suspend with no active task
   const r4 = run(`${TOOL} suspend "no task"`, true);
-  assert(r4.parsed && r4.parsed.error, 'suspend on idle state fails', JSON.stringify(r4.parsed));
+  assert(r4.parsed?.error, 'suspend on idle state fails', JSON.stringify(r4.parsed));
 
   // Resume with no suspended task
   const r5 = run(`${TOOL} resume`, true);
-  assert(r5.parsed && r5.parsed.error, 'resume on idle state fails', JSON.stringify(r5.parsed));
+  assert(r5.parsed?.error, 'resume on idle state fails', JSON.stringify(r5.parsed));
 
   // Validate with no active task — returns valid:false (not an error exit)
   const r6 = run(`${TOOL} validate`);
-  if (r6.parsed && r6.parsed.valid === false) {
+  if (r6.parsed?.valid === false) {
     assert(true, 'validate on idle state returns valid:false');
   } else {
     const r6b = run(`${TOOL} validate`, true);
-    assert(r6b.parsed && r6b.parsed.error, 'validate on idle state fails', JSON.stringify(r6b.parsed));
+    assert(r6b.parsed?.error, 'validate on idle state fails', JSON.stringify(r6b.parsed));
   }
 
   // Rollback with no checkpoints
   const r7 = run(`${TOOL} rollback 1`, true);
-  assert(r7.parsed && r7.parsed.error, 'rollback on idle state fails', JSON.stringify(r7.parsed));
+  assert(r7.parsed?.error, 'rollback on idle state fails', JSON.stringify(r7.parsed));
+}
 
+function testEdgeCasesInitVariations() {
   section('EDGE CASES: Init Variations');
 
   // Init with minimal profile
   const r8 = run(`${TOOL} init minimal-task --profile minimal`);
   assert(r8.ok, 'init with minimal profile succeeds');
-  assert(r8.parsed && r8.parsed.profile === 'minimal', 'minimal profile recorded', r8.parsed ? r8.parsed.profile : 'null');
+  assert(r8.parsed?.profile === 'minimal', 'minimal profile recorded', r8.parsed?.profile ?? 'null');
 
   // Check minimal has fewer files
-  const ctx = path.join(TEST_DIR, '.github', 'context');
   // minimal should NOT have research-findings.md or some optional files
   // (depends on implementation — just verify init worked)
 
@@ -363,13 +365,13 @@ function testEdgeCases() {
   // Init with full profile
   const r9 = run(`${TOOL} init full-task --profile full`);
   assert(r9.ok, 'init with full profile succeeds');
-  assert(r9.parsed && r9.parsed.profile === 'full', 'full profile recorded', r9.parsed ? r9.parsed.profile : 'null');
+  assert(r9.parsed?.profile === 'full', 'full profile recorded', r9.parsed?.profile ?? 'null');
   run(`${TOOL} archive --abandoned`);
 
   // Init with extended profile
   const r10 = run(`${TOOL} init extended-task --profile extended`);
   assert(r10.ok, 'init with extended profile succeeds');
-  assert(r10.parsed && r10.parsed.profile === 'extended', 'extended profile recorded', r10.parsed ? r10.parsed.profile : 'null');
+  assert(r10.parsed?.profile === 'extended', 'extended profile recorded', r10.parsed?.profile ?? 'null');
   run(`${TOOL} archive --abandoned`);
 
   // Init with invalid profile falls back to standard
@@ -378,9 +380,11 @@ function testEdgeCases() {
     assert(true, 'init with unknown profile still succeeds (fallback)');
     run(`${TOOL} archive --abandoned`);
   } else {
-    assert(r11.parsed && r11.parsed.error, 'init with unknown profile fails with clear error');
+    assert(r11.parsed?.error, 'init with unknown profile fails with clear error');
   }
+}
 
+function testEdgeCasesCheckpointRollback() {
   section('EDGE CASES: Checkpoint / Rollback');
 
   // Start a task and create multiple checkpoints
@@ -418,11 +422,13 @@ function testEdgeCases() {
 
   // Rollback to non-existent phase
   const rb2 = run(`${TOOL} rollback 99`, true);
-  assert(rb2.parsed && rb2.parsed.error, 'rollback to non-existent phase fails');
+  assert(rb2.parsed?.error, 'rollback to non-existent phase fails');
 
   // Clean up
   run(`${TOOL} archive --abandoned`);
+}
 
+function testEdgeCasesSuspendResume() {
   section('EDGE CASES: Suspend / Resume Cycle');
 
   run(`${TOOL} init suspend-test`);
@@ -430,14 +436,14 @@ function testEdgeCases() {
   // Double suspend
   run(`${TOOL} suspend "first pause"`);
   const ds = run(`${TOOL} suspend "double suspend"`, true);
-  assert(ds.parsed && ds.parsed.error, 'double suspend fails');
+  assert(ds.parsed?.error, 'double suspend fails');
 
   // Resume
   run(`${TOOL} resume`);
 
   // Double resume (already active)
   const dr = run(`${TOOL} resume`, true);
-  assert(dr.parsed && dr.parsed.error, 'double resume fails (already active)');
+  assert(dr.parsed?.error, 'double resume fails (already active)');
 
   // Suspend then archive (abandoned)
   run(`${TOOL} suspend "going to abandon"`);
@@ -480,7 +486,7 @@ function testSearchAfterMultipleTasks() {
   // We've archived several tasks by now — search for common terms
   const r1 = run(`${TOOL} search duplicate`);
   assert(r1.ok, 'search for "duplicate" succeeds');
-  assert(r1.parsed && r1.parsed.matches && r1.parsed.matches.length >= 1, 'search finds archived duplicate tasks');
+  assert(r1.parsed?.matches?.length >= 1, 'search finds archived duplicate tasks');
 
   const r2 = run(`${TOOL} history --last 3`);
   assert(r2.ok, 'history --last 3 succeeds');
@@ -488,7 +494,7 @@ function testSearchAfterMultipleTasks() {
 
   // History with --last 0 (invalid — expects positive integer)
   const r3 = run(`${TOOL} history --last 0`, true);
-  assert(r3.parsed && r3.parsed.error, 'history --last 0 fails (must be positive)');
+  assert(r3.parsed?.error, 'history --last 0 fails (must be positive)');
 }
 
 function testContextFileIntegrity() {
@@ -565,7 +571,7 @@ function testCompactWithData() {
   const intelPath = path.join(ctx, 'codebase-intel.md');
   let intel = fs.readFileSync(intelPath, 'utf-8');
   // Add 500 lines
-  const padding = '\n' + Array(500).fill('- Entry: some knowledge about the codebase').join('\n');
+  const padding = '\n' + new Array(500).fill('- Entry: some knowledge about the codebase').join('\n');
   fs.writeFileSync(intelPath, intel + padding);
 
   const linesBefore = fs.readFileSync(intelPath, 'utf-8').split('\n').length;
@@ -584,7 +590,7 @@ function testSetupWithoutExistingGithub() {
   // Status should return idle
   const r = run(`${TOOL} status`);
   assert(r.ok, 'status on idle state succeeds');
-  assert(r.parsed && r.parsed.status === 'idle', 'fresh status shows idle', r.parsed ? r.parsed.status : 'null');
+  assert(r.parsed?.status === 'idle', 'fresh status shows idle', r.parsed?.status ?? 'null');
 }
 
 function testCheckpointWithoutPhaseArg() {
@@ -596,7 +602,7 @@ function testCheckpointWithoutPhaseArg() {
   if (r.ok) {
     assert(true, 'checkpoint without phase uses default');
   } else {
-    assert(r.parsed && r.parsed.error, 'checkpoint without phase fails with clear error');
+    assert(r.parsed?.error, 'checkpoint without phase fails with clear error');
   }
   run(`${TOOL} archive --abandoned`);
 }
@@ -607,7 +613,7 @@ function testInitWithSpecialCharacters() {
   const r1 = run(`${TOOL} init "fix bug #123"`);
   if (r1.ok) {
     assert(true, 'init with spaces/special chars succeeds');
-    assert(r1.parsed && r1.parsed.initialized, 'task ID generated for special char name');
+    assert(r1.parsed?.initialized, 'task ID generated for special char name');
     run(`${TOOL} archive --abandoned`);
   } else {
     assert(true, 'init with special chars handled (may sanitize)');
@@ -627,16 +633,15 @@ function testFullLifecycleEndToEnd() {
 
   // 1. Status → idle
   let s = run(`${TOOL} status`);
-  assert(s.parsed && s.parsed.status === 'idle', 'lifecycle: starts idle');
+  assert(s.parsed?.status === 'idle', 'lifecycle: starts idle');
 
   // 2. Init
   let r = run(`${TOOL} init e2e-lifecycle-test --profile standard`);
-  assert(r.ok && r.parsed && r.parsed.initialized, 'lifecycle: init');
-  const taskId = r.parsed.initialized;
+  assert(r.ok && r.parsed?.initialized, 'lifecycle: init');
 
   // 3. Status → active
   s = run(`${TOOL} status`);
-  assert(s.parsed && s.parsed.status === 'active', 'lifecycle: active after init');
+  assert(s.parsed?.status === 'active', 'lifecycle: active after init');
 
   // 4. Validate
   r = run(`${TOOL} validate`);
@@ -656,7 +661,7 @@ function testFullLifecycleEndToEnd() {
 
   // 8. Status → suspended
   s = run(`${TOOL} status`);
-  assert(s.parsed && s.parsed.status === 'suspended', 'lifecycle: suspended');
+  assert(s.parsed?.status === 'suspended', 'lifecycle: suspended');
 
   // 9. Resume
   r = run(`${TOOL} resume`);
@@ -664,7 +669,7 @@ function testFullLifecycleEndToEnd() {
 
   // 10. Status → active
   s = run(`${TOOL} status`);
-  assert(s.parsed && s.parsed.status === 'active', 'lifecycle: active after resume');
+  assert(s.parsed?.status === 'active', 'lifecycle: active after resume');
 
   // 11. More checkpoints
   run(`${TOOL} checkpoint 3`);
@@ -688,15 +693,15 @@ function testFullLifecycleEndToEnd() {
 
   // 16. Status → idle
   s = run(`${TOOL} status`);
-  assert(s.parsed && s.parsed.status === 'idle', 'lifecycle: idle after archive');
+  assert(s.parsed?.status === 'idle', 'lifecycle: idle after archive');
 
   // 17. Search for it
   r = run(`${TOOL} search e2e-lifecycle`);
-  assert(r.ok && r.parsed && r.parsed.matches && r.parsed.matches.length > 0, 'lifecycle: found in search');
+  assert(r.ok && r.parsed?.matches?.length > 0, 'lifecycle: found in search');
 
   // 18. History
   r = run(`${TOOL} history --last 1`);
-  assert(r.ok && r.parsed && r.parsed.tasks.length > 0, 'lifecycle: in history');
+  assert(r.ok && r.parsed?.tasks.length > 0, 'lifecycle: in history');
 
   // 19. Compact
   r = run(`${TOOL} compact`);
@@ -747,7 +752,11 @@ function main() {
     testCompact();
 
     // Edge Cases
-    testEdgeCases();
+    testEdgeCasesInvalidCommands();
+    testEdgeCasesWrongState();
+    testEdgeCasesInitVariations();
+    testEdgeCasesCheckpointRollback();
+    testEdgeCasesSuspendResume();
     testTaskIdUniqueness();
     testSearchAfterMultipleTasks();
     testContextFileIntegrity();
@@ -759,7 +768,7 @@ function main() {
     testFullLifecycleEndToEnd();
 
   } catch (e) {
-    console.log(`\n💥 FATAL ERROR: ${e.message}`);
+    console.log(`\n[FATAL] ERROR: ${e.message}`);
     console.log(e.stack);
     FAIL++;
   }

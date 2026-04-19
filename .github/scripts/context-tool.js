@@ -11,19 +11,86 @@
  * Built with zero dependencies — only Node.js built-in modules (fs, path).
  */
 
-const fs = require('fs');
-const path = require('path');
+const fs = require('node:fs');
+const path = require('node:path');
+const crypto = require('node:crypto');
 
 // ─────────────────────────────────────────────────────────
 // CONFIGURABLE CONSTANTS — tune these based on real usage
+// Users can override by creating .github/context/config.json
 // ─────────────────────────────────────────────────────────
 
-const CODEBASE_INTEL_MAX_LINES = 400;    // Trigger compaction above this
-const CODEBASE_INTEL_TARGET_LINES = 300; // Compact down to this
-const TASK_INDEX_MAX_ENTRIES = 50;        // Split index above this
-const TASK_INDEX_RECENT_KEEP = 20;        // Keep this many in active index
-const COMPACT_EVERY_N_TASKS = 5;          // Auto-compact trigger
-const RESEARCH_FINDINGS_MAX_LINES = 500;  // Archive if exceeds (per-task)
+// Default values (overridden by config.json if it exists)
+let CODEBASE_INTEL_MAX_LINES = 400;    // Trigger compaction above this
+let CODEBASE_INTEL_TARGET_LINES = 300; // Compact down to this
+let TASK_INDEX_MAX_ENTRIES = 50;        // Split index above this
+let TASK_INDEX_RECENT_KEEP = 20;        // Keep this many in active index
+let COMPACT_EVERY_N_TASKS = 5;          // Auto-compact trigger
+let RESEARCH_FINDINGS_MAX_LINES = 500;  // Archive if exceeds (per-task)
+
+// Profile-based context configuration — single source of truth
+// Controls WHAT to include per profile, NOT how much to truncate.
+// Goal: filter irrelevant context, never truncate relevant context.
+const PROFILE_BUDGETS = {
+  minimal: {
+    // Quick fixes, typos, small changes — only essential context
+    include_sections: ['what', 'why', 'constraints', 'blockers'],
+    detail_level: 'summary',     // summarize long sections
+    include_decisions: 3,         // last N decisions
+    include_research: false,      // skip research findings
+    include_history: false,       // skip phase history detail
+  },
+  standard: {
+    // Normal tasks — balanced context
+    include_sections: ['what', 'why', 'context', 'constraints', 'decisions', 'blockers'],
+    detail_level: 'normal',      // include full sections
+    include_decisions: 10,        // last N decisions
+    include_research: true,       // include if relevant
+    include_history: true,        // include phase history
+  },
+  full: {
+    // Large features — comprehensive context
+    include_sections: ['what', 'why', 'context', 'constraints', 'decisions', 'blockers', 'research'],
+    detail_level: 'full',        // include everything, no summarization
+    include_decisions: 'all',     // all decisions
+    include_research: true,
+    include_history: true,
+  },
+  extended: {
+    // Complex multi-sprint work — everything available
+    include_sections: ['what', 'why', 'context', 'constraints', 'decisions', 'blockers', 'research', 'history'],
+    detail_level: 'full',
+    include_decisions: 'all',
+    include_research: true,
+    include_history: true,
+  },
+};
+
+function applyConfig(config) {
+  if (config.codebase_intel_max_lines) CODEBASE_INTEL_MAX_LINES = config.codebase_intel_max_lines;
+  if (config.codebase_intel_target_lines) CODEBASE_INTEL_TARGET_LINES = config.codebase_intel_target_lines;
+  if (config.task_index_max_entries) TASK_INDEX_MAX_ENTRIES = config.task_index_max_entries;
+  if (config.task_index_recent_keep) TASK_INDEX_RECENT_KEEP = config.task_index_recent_keep;
+  if (config.compact_every_n_tasks) COMPACT_EVERY_N_TASKS = config.compact_every_n_tasks;
+  if (config.research_findings_max_lines) RESEARCH_FINDINGS_MAX_LINES = config.research_findings_max_lines;
+}
+
+// Load user overrides from config.json if it exists
+(function loadConfig() {
+  try {
+    // Can't use CONTEXT_DIR yet (not resolved), so build path manually
+    const startDir = path.resolve(process.cwd());
+    let dir = startDir;
+    while (dir !== path.dirname(dir)) {
+      const configPath = path.join(dir, '.github', 'context', 'config.json');
+      if (fs.existsSync(configPath)) {
+        applyConfig(JSON.parse(fs.readFileSync(configPath, 'utf-8')));
+        break;
+      }
+      dir = path.dirname(dir);
+    }
+  } catch { /* ignore config errors — use defaults */ }
+})();
 
 // ─────────────────────────────────────────────────────────
 // PATH RESOLUTION
@@ -57,6 +124,14 @@ const TASK_LEVEL_FILES = [
 
 // Persistent file (NOT a template — created directly by setup)
 const PERSISTENT_FILE = 'codebase-intel.md';
+
+// Profile-based file sets for init (Enhancement C)
+const PROFILE_FILES = {
+  minimal: ['task-status.md', 'code-changes.md', 'git-status.md'],
+  standard: TASK_LEVEL_FILES, // all 9 (default behavior)
+  full: [...TASK_LEVEL_FILES], // all 9
+  extended: [...TASK_LEVEL_FILES], // all 9 + ADR folder
+};
 
 // ─────────────────────────────────────────────────────────
 // TEMPLATE CONTENTS
@@ -310,7 +385,7 @@ function parseContextHeaders(content) {
   for (const line of lines) {
     const match = line.match(/^\*\*(.+?)\*\*:\s*(.+)$/);
     if (match) {
-      const key = match[1].trim().toLowerCase().replace(/\s+/g, '_');
+      const key = match[1].trim().toLowerCase().replaceAll(/\s+/g, '_');
       headers[key] = match[2].trim();
     }
   }
@@ -324,10 +399,10 @@ function parseContextHeaders(content) {
 function generateTaskId(name) {
   const kebab = name
     .toLowerCase()
-    .replace(/[^a-z0-9\s-]/g, '')
-    .replace(/\s+/g, '-')
-    .replace(/-+/g, '-')
-    .replace(/^-|-$/g, '')
+    .replaceAll(/[^a-z0-9\s-]/g, '')
+    .replaceAll(/\s+/g, '-')
+    .replaceAll(/-+/g, '-')
+    .replaceAll(/^-|-$/g, '')
     .split('-')
     .slice(0, 5)
     .join('-');
@@ -338,7 +413,7 @@ function generateTaskId(name) {
   const indexPath = path.join(ARCHIVE_DIR, 'task-index.md');
   if (fileExists(indexPath)) {
     const indexContent = readFileContent(indexPath);
-    if (indexContent && indexContent.includes(base)) {
+    if (indexContent?.includes(base)) {
       // Find the next available suffix
       let suffix = 2;
       while (indexContent.includes(`${base}-${suffix}`)) {
@@ -357,9 +432,9 @@ function generateTaskId(name) {
 function stampTemplate(content, taskId) {
   const timestamp = now();
   return content
-    .replace(/\*\*Task ID\*\*: \(pending\)/g, `**Task ID**: ${taskId}`)
-    .replace(/\*\*Last Updated\*\*: \(pending\)/g, `**Last Updated**: ${timestamp}`)
-    .replace(/\*\*Started\*\*: \(pending\)/g, `**Started**: ${timestamp}`);
+    .replaceAll('**Task ID**: (pending)', `**Task ID**: ${taskId}`)
+    .replaceAll('**Last Updated**: (pending)', `**Last Updated**: ${timestamp}`)
+    .replaceAll('**Started**: (pending)', `**Started**: ${timestamp}`);
 }
 
 // ─────────────────────────────────────────────────────────
@@ -437,74 +512,83 @@ function cmdSetup() {
 // sets status to active.
 // ─────────────────────────────────────────────────────────
 
+function checkNoActiveTask(statusPath) {
+  if (!fileExists(statusPath)) return;
+  const content = readFileContent(statusPath);
+  const headers = parseContextHeaders(content);
+  if (headers.status === 'active') {
+    fail(
+      `Active task detected: ${headers.task_id || '(unknown)'}. ` +
+      'Archive or suspend it before starting a new task. ' +
+      'Run `context-tool archive --abandoned` or `context-tool suspend "reason"`.'
+    );
+  }
+  if (headers.status === 'suspended') {
+    fail(
+      `Suspended task detected: ${headers.task_id || '(unknown)'}. ` +
+      'Archive or resume it before starting a new task. ' +
+      'Run `context-tool archive --abandoned` or `context-tool resume`.'
+    );
+  }
+}
+
+function resolvePreviousTask(statusPath) {
+  if (!fileExists(statusPath)) return '(none)';
+  const content = readFileContent(statusPath);
+  const headers = parseContextHeaders(content);
+  if (headers.previous_task && headers.previous_task !== '(none)') {
+    return headers.previous_task;
+  }
+  if (headers.task_id && headers.task_id !== '(none)') {
+    return `${headers.task_id} (${headers.status || 'unknown'})`;
+  }
+  return '(none)';
+}
+
+function copyTemplates(profileFiles, taskId) {
+  const filesCreated = [];
+  for (const filename of profileFiles) {
+    const templatePath = path.join(TEMPLATES_DIR, filename);
+    const targetPath = path.join(CONTEXT_DIR, filename);
+
+    if (fileExists(templatePath)) {
+      const content = readFileContent(templatePath);
+      writeFile(targetPath, stampTemplate(content, taskId));
+      filesCreated.push(filename);
+    } else {
+      const embeddedContent = TEMPLATES[filename];
+      if (embeddedContent) {
+        writeFile(targetPath, stampTemplate(embeddedContent, taskId));
+        filesCreated.push(filename);
+      }
+    }
+  }
+  return filesCreated;
+}
+
 function cmdInit() {
   const name = process.argv[3];
   if (!name || name.startsWith('--')) {
     fail('Usage: context-tool init <task-name> [--profile <profile>]');
   }
 
-  // Verify setup has been done
   if (!fileExists(TEMPLATES_DIR)) {
     fail('Templates not found. Run `context-tool setup` first.');
   }
 
-  // Check for active/suspended task
   const statusPath = path.join(CONTEXT_DIR, 'task-status.md');
-  if (fileExists(statusPath)) {
-    const content = readFileContent(statusPath);
-    const headers = parseContextHeaders(content);
-    const currentStatus = headers.status;
-    if (currentStatus === 'active') {
-      fail(
-        `Active task detected: ${headers.task_id || '(unknown)'}. ` +
-        'Archive or suspend it before starting a new task. ' +
-        'Run `context-tool archive --abandoned` or `context-tool suspend "reason"`.'
-      );
-    }
-    if (currentStatus === 'suspended') {
-      fail(
-        `Suspended task detected: ${headers.task_id || '(unknown)'}. ` +
-        'Archive or resume it before starting a new task. ' +
-        'Run `context-tool archive --abandoned` or `context-tool resume`.'
-      );
-    }
-  }
+  checkNoActiveTask(statusPath);
 
   const profile = getProfileFlag();
   const taskId = generateTaskId(name);
   const timestamp = now();
+  const previousTask = resolvePreviousTask(statusPath);
 
-  // Determine previous task from current task-status
-  let previousTask = '(none)';
-  if (fileExists(statusPath)) {
-    const content = readFileContent(statusPath);
-    const headers = parseContextHeaders(content);
-    if (headers.previous_task && headers.previous_task !== '(none)') {
-      previousTask = headers.previous_task;
-    } else if (headers.task_id && headers.task_id !== '(none)') {
-      previousTask = `${headers.task_id} (${headers.status || 'unknown'})`;
-    }
+  const profileFiles = PROFILE_FILES[profile] || TASK_LEVEL_FILES;
+  if (!PROFILE_FILES[profile]) {
+    console.error(`WARNING: Unknown profile "${profile}". Defaulting to standard.`);
   }
-
-  // Copy templates to active context
-  const filesCreated = [];
-  for (const filename of TASK_LEVEL_FILES) {
-    const templatePath = path.join(TEMPLATES_DIR, filename);
-    const targetPath = path.join(CONTEXT_DIR, filename);
-
-    if (!fileExists(templatePath)) {
-      // If template missing, use embedded template
-      const embeddedContent = TEMPLATES[filename];
-      if (embeddedContent) {
-        writeFile(targetPath, stampTemplate(embeddedContent, taskId));
-        filesCreated.push(filename);
-      }
-    } else {
-      const content = readFileContent(templatePath);
-      writeFile(targetPath, stampTemplate(content, taskId));
-      filesCreated.push(filename);
-    }
-  }
+  const filesCreated = copyTemplates(profileFiles, taskId);
 
   // Write the active task-status.md with full info
   const taskStatusContent = `# Task Status
@@ -526,6 +610,11 @@ function cmdInit() {
 
   writeFile(path.join(CONTEXT_DIR, 'task-status.md'), taskStatusContent);
 
+  // For extended profile: create architecture-decisions folder
+  if (profile === 'extended') {
+    ensureDir(path.join(CONTEXT_DIR, 'architecture-decisions'));
+  }
+
   output({
     initialized: taskId,
     profile,
@@ -542,6 +631,77 @@ function cmdInit() {
 // Returns current task state as JSON. Used by Coordinator
 // at conversation start and for "where are we?" queries.
 // ─────────────────────────────────────────────────────────
+
+function countArchivedTasks(indexPath) {
+  if (!fileExists(indexPath)) return 0;
+  const indexContent = readFileContent(indexPath);
+  if (!indexContent) return 0;
+  return indexContent.split('\n').filter((l) => l.startsWith('| TASK-')).length;
+}
+
+function countTasksSinceCompact(indexPath) {
+  if (!fileExists(indexPath)) return 0;
+  const indexContent = readFileContent(indexPath);
+  if (!indexContent) return 0;
+  const lines = indexContent.split('\n').filter(
+    (l) => l.startsWith('|') && !l.includes('Task ID') && !l.includes('---')
+  );
+  return lines.length % COMPACT_EVERY_N_TASKS;
+}
+
+function listCheckpoints() {
+  const checkpoints = [];
+  if (!fileExists(CHECKPOINTS_DIR)) return checkpoints;
+  try {
+    const dirs = fs.readdirSync(CHECKPOINTS_DIR, { withFileTypes: true });
+    for (const d of dirs) {
+      if (d.isDirectory() && d.name.startsWith('phase-')) {
+        checkpoints.push(d.name);
+      }
+    }
+  } catch { /* ignore read errors */ }
+  return checkpoints;
+}
+
+function getSuggestion(status, existingFileCount) {
+  if (status === 'idle' && existingFileCount > 2) {
+    return 'Orphaned context files detected from a previous task. Archive or investigate.';
+  }
+  switch (status) {
+    case 'idle': return 'No active task. Ready to accept a new task.';
+    case 'active': return 'Task was active when session ended. Ask user: resume, abandon, or review?';
+    case 'suspended': return 'Task was explicitly suspended. Ask user: resume or abandon?';
+    case 'completed': return 'Task completed but not archived. Run `context-tool archive` to clean up.';
+    default: return `Unknown status "${status}". Investigate context files.`;
+  }
+}
+
+function calcDaysSinceUpdate(lastUpdated) {
+  if (!lastUpdated || lastUpdated === '(pending)' || lastUpdated === '(none)') return null;
+  try {
+    const updateDate = new Date(lastUpdated);
+    const nowDate = new Date();
+    return Math.floor((nowDate.getTime() - updateDate.getTime()) / (1000 * 60 * 60 * 24));
+  } catch { return null; }
+}
+
+function getLastTaskChangedFiles(previousTask) {
+  const files = [];
+  if (!previousTask || previousTask === '(none)') return files;
+  const prevTaskId = previousTask.replace(/\s*\(.+\)\s*$/, '');
+  const prevCodeChanges = path.join(ARCHIVE_DIR, prevTaskId, 'code-changes.md');
+  if (!fileExists(prevCodeChanges)) return files;
+  const ccContent = readFileContent(prevCodeChanges);
+  if (!ccContent) return files;
+  const fileMatches = ccContent.matchAll(/\|\s*`?([^|`]+\.\w+)`?\s*\|/g);
+  for (const m of fileMatches) {
+    const fp = m[1].trim();
+    if (fp && !fp.includes('File') && !fp.includes('---')) {
+      files.push(fp);
+    }
+  }
+  return files;
+}
 
 function cmdStatus() {
   const statusPath = path.join(CONTEXT_DIR, 'task-status.md');
@@ -591,7 +751,7 @@ function cmdStatus() {
   let phaseName = null;
   const phaseMatch = currentPhase.match(/Phase\s+(\d+):\s*(.+)/i);
   if (phaseMatch) {
-    phaseNum = parseInt(phaseMatch[1], 10);
+    phaseNum = Number.parseInt(phaseMatch[1], 10);
     phaseName = phaseMatch[2].trim();
   }
 
@@ -599,18 +759,8 @@ function cmdStatus() {
   const codebaseRefreshNeeded = headers.codebase_refresh_needed === 'true';
 
   // Count tasks since last compact
-  let tasksSinceCompact = 0;
   const indexPath = path.join(ARCHIVE_DIR, 'task-index.md');
-  if (fileExists(indexPath)) {
-    const indexContent = readFileContent(indexPath);
-    if (indexContent) {
-      // Count data rows (lines with | that aren't the header)
-      const lines = indexContent.split('\n').filter(
-        (l) => l.startsWith('|') && !l.includes('Task ID') && !l.includes('---')
-      );
-      tasksSinceCompact = lines.length % COMPACT_EVERY_N_TASKS;
-    }
-  }
+  const tasksSinceCompact = countTasksSinceCompact(indexPath);
 
   // Count codebase-intel.md lines
   const codebaseIntelPath = path.join(CONTEXT_DIR, PERSISTENT_FILE);
@@ -619,15 +769,7 @@ function cmdStatus() {
     : 0;
 
   // Count total archived tasks
-  let archiveTaskCount = 0;
-  if (fileExists(indexPath)) {
-    const indexContent = readFileContent(indexPath);
-    if (indexContent) {
-      archiveTaskCount = indexContent.split('\n').filter(
-        (l) => l.startsWith('| TASK-')
-      ).length;
-    }
-  }
+  const archiveTaskCount = countArchivedTasks(indexPath);
 
   // Detect context files that exist
   const existingFiles = TASK_LEVEL_FILES.filter((f) =>
@@ -638,90 +780,30 @@ function cmdStatus() {
   }
 
   // Detect available checkpoints
-  const checkpoints = [];
-  if (fileExists(CHECKPOINTS_DIR)) {
-    try {
-      const dirs = fs.readdirSync(CHECKPOINTS_DIR, { withFileTypes: true });
-      for (const d of dirs) {
-        if (d.isDirectory() && d.name.startsWith('phase-')) {
-          checkpoints.push(d.name);
-        }
-      }
-    } catch {
-      // ignore read errors
-    }
-  }
+  const checkpoints = listCheckpoints();
 
   // Build suggestion based on status
-  let suggestion = '';
-  switch (status) {
-    case 'idle':
-      suggestion = 'No active task. Ready to accept a new task.';
-      break;
-    case 'active':
-      suggestion = `Task was active when session ended. Ask user: resume, abandon, or review?`;
-      break;
-    case 'suspended':
-      suggestion = `Task was explicitly suspended. Ask user: resume or abandon?`;
-      break;
-    case 'completed':
-      suggestion = `Task completed but not archived. Run \`context-tool archive\` to clean up.`;
-      break;
-    default:
-      suggestion = `Unknown status "${status}". Investigate context files.`;
-  }
-
-  // Check for orphaned files (files exist but status is idle/unknown)
-  if (status === 'idle' && existingFiles.length > 2) {
-    // More than just task-status.md and codebase-intel.md
-    suggestion = 'Orphaned context files detected from a previous task. Archive or investigate.';
-  }
+  const suggestion = getSuggestion(status, existingFiles.length);
 
   // Calculate days since last update (for stale detection)
-  let daysSinceUpdate = null;
-  if (lastUpdated && lastUpdated !== '(pending)' && lastUpdated !== '(none)') {
-    try {
-      const updateDate = new Date(lastUpdated);
-      const nowDate = new Date();
-      daysSinceUpdate = Math.floor(
-        (nowDate.getTime() - updateDate.getTime()) / (1000 * 60 * 60 * 24)
-      );
-    } catch {
-      // ignore date parse errors
-    }
-  }
+  const daysSinceUpdate = calcDaysSinceUpdate(lastUpdated);
 
   // Build last_task_changed_files from previous task archive if needed
-  let lastTaskChangedFiles = [];
-  if (codebaseRefreshNeeded && previousTask && previousTask !== '(none)') {
-    const prevTaskId = previousTask.replace(/\s*\(.+\)\s*$/, '');
-    const prevCodeChanges = path.join(ARCHIVE_DIR, prevTaskId, 'code-changes.md');
-    if (fileExists(prevCodeChanges)) {
-      const ccContent = readFileContent(prevCodeChanges);
-      if (ccContent) {
-        // Extract file paths from the table rows
-        const fileMatches = ccContent.matchAll(/\|\s*`?([^|`]+\.\w+)`?\s*\|/g);
-        for (const m of fileMatches) {
-          const fp = m[1].trim();
-          if (fp && !fp.includes('File') && !fp.includes('---')) {
-            lastTaskChangedFiles.push(fp);
-          }
-        }
-      }
-    }
-  }
+  const lastTaskChangedFiles = codebaseRefreshNeeded
+    ? getLastTaskChangedFiles(previousTask)
+    : [];
 
   output({
     status,
     task_id: taskId === '(none)' ? null : taskId,
     phase: phaseNum,
     phase_name: phaseName,
-    phase_progress: phaseProgress !== '(none)' ? phaseProgress : null,
-    context_profile: profile !== '(none)' ? profile : null,
+    phase_progress: phaseProgress === '(none)' ? null : phaseProgress,
+    context_profile: profile === '(none)' ? null : profile,
     started,
     last_updated: lastUpdated,
     days_since_update: daysSinceUpdate,
-    previous_task: previousTask !== '(none)' ? previousTask : null,
+    previous_task: previousTask === '(none)' ? null : previousTask,
     codebase_refresh_needed: codebaseRefreshNeeded,
     last_task_changed_files: lastTaskChangedFiles.length > 0 ? lastTaskChangedFiles : null,
     tasks_since_compact: tasksSinceCompact,
@@ -729,7 +811,7 @@ function cmdStatus() {
     archive_task_count: archiveTaskCount,
     existing_context_files: existingFiles,
     checkpoints: checkpoints.length > 0 ? checkpoints : null,
-    suggested_default: profile !== '(none)' ? profile : 'standard',
+    suggested_default: profile === '(none)' ? 'standard' : profile,
     setup_needed: false,
     suggestion,
   });
@@ -746,163 +828,147 @@ function cmdStatus() {
 //   6. Resets task-status.md to idle
 // ─────────────────────────────────────────────────────────
 
-function cmdArchive() {
-  const isAbandoned = process.argv.includes('--abandoned');
-
-  // Read current task-status.md
-  const statusPath = path.join(CONTEXT_DIR, 'task-status.md');
-  if (!fileExists(statusPath)) {
-    fail('No task-status.md found. Nothing to archive.');
-  }
-
-  const statusContent = readFileContent(statusPath);
-  if (!statusContent) {
-    fail('task-status.md is empty or unreadable.');
-  }
-
-  const statusHeaders = parseContextHeaders(statusContent);
-  const taskId = statusHeaders.task_id;
-  const currentStatus = statusHeaders.status;
-
-  // Guard: must have a real task to archive
-  if (!taskId || taskId === '(none)') {
-    fail('No active task to archive. task-status.md has no Task ID.');
-  }
-
-  if (currentStatus === 'idle') {
-    fail('Task is already idle. Nothing to archive.');
-  }
-
-  const archiveStatus = isAbandoned ? 'abandoned' : 'completed';
-
-  // Gather metadata from all context files
-  const contextData = {};
+function gatherContextData() {
+  const data = {};
   for (const filename of TASK_LEVEL_FILES) {
     const filePath = path.join(CONTEXT_DIR, filename);
     if (fileExists(filePath)) {
-      contextData[filename] = {
-        content: readFileContent(filePath),
-        headers: parseContextHeaders(readFileContent(filePath)),
-      };
+      const content = readFileContent(filePath);
+      data[filename] = { content, headers: parseContextHeaders(content) };
     }
   }
+  return data;
+}
 
-  // Extract summary from requirements.md
-  let summary = '(no summary)';
-  if (contextData['requirements.md']) {
-    const reqContent = contextData['requirements.md'].content;
-    // Try to extract from "## User Story Summary" section
-    const summaryMatch = reqContent.match(
-      /## User Story Summary\s*\n([\s\S]*?)(?=\n##|\n\*\*|$)/
-    );
-    if (summaryMatch) {
-      const rawSummary = summaryMatch[1].trim();
-      if (rawSummary && !rawSummary.startsWith('(To be filled')) {
-        // Take first line or first 120 chars
-        summary = rawSummary.split('\n')[0].slice(0, 120);
+function extractSummary(contextData) {
+  if (!contextData['requirements.md']) return '(no summary)';
+  const reqContent = contextData['requirements.md'].content;
+  const summaryMatch = reqContent.match(/## User Story Summary\s*\n([\s\S]*?)(?=\n##|\n\*\*|$)/);
+  if (!summaryMatch) return '(no summary)';
+  const rawSummary = summaryMatch[1].trim();
+  if (!rawSummary || rawSummary.startsWith('(To be filled')) return '(no summary)';
+  return rawSummary.split('\n')[0].slice(0, 120);
+}
+
+function extractFilesChanged(contextData) {
+  if (!contextData['code-changes.md']) return [];
+  const ccContent = contextData['code-changes.md'].content;
+  const rows = ccContent.split('\n').filter((l) =>
+    l.startsWith('|') && !l.includes('File') && !l.includes('---') && !l.includes('Action')
+  );
+  const result = [];
+  for (const row of rows) {
+    const cells = row.split('|').map((c) => c.trim()).filter(Boolean);
+    if (cells.length >= 2) {
+      const file = cells[0].replaceAll('`', '');
+      if (file?.includes('.')) {
+        result.push({ file, action: cells[1] });
       }
     }
   }
+  return result;
+}
 
-  // Extract files changed from code-changes.md
-  let filesChanged = [];
-  let filesChangedCount = 0;
-  let codebaseRefreshNeeded = false;
-  if (contextData['code-changes.md']) {
-    const ccContent = contextData['code-changes.md'].content;
-    // Parse table rows: | filename | action | ...
-    const rows = ccContent.split('\n').filter((l) => {
-      return l.startsWith('|') && !l.includes('File') && !l.includes('---') && !l.includes('Action');
-    });
-    for (const row of rows) {
-      const cells = row.split('|').map((c) => c.trim()).filter(Boolean);
-      if (cells.length >= 2) {
-        const file = cells[0].replace(/`/g, '');
-        const action = cells[1];
-        if (file && file.includes('.')) {
-          filesChanged.push({ file, action });
-        }
-      }
-    }
-    filesChangedCount = filesChanged.length;
-    codebaseRefreshNeeded = filesChangedCount > 0;
-  }
-
-  // Extract key decisions from decisions-and-blockers.md
-  let decisions = [];
-  if (contextData['decisions-and-blockers.md']) {
-    const dbContent = contextData['decisions-and-blockers.md'].content;
-    const rows = dbContent.split('\n').filter((l) => {
-      return l.startsWith('|') && !l.includes('Decision') && !l.includes('---') && !l.includes('#');
-    });
-    for (const row of rows) {
-      const cells = row.split('|').map((c) => c.trim()).filter(Boolean);
-      if (cells.length >= 2) {
-        decisions.push(`${cells[1]} (${cells[2] || ''})`);
-      }
+function extractDecisions(contextData) {
+  if (!contextData['decisions-and-blockers.md']) return [];
+  const dbContent = contextData['decisions-and-blockers.md'].content;
+  const rows = dbContent.split('\n').filter((l) =>
+    l.startsWith('|') && !l.includes('Decision') && !l.includes('---') && !l.includes('#')
+  );
+  const result = [];
+  for (const row of rows) {
+    const cells = row.split('|').map((c) => c.trim()).filter(Boolean);
+    if (cells.length >= 2) {
+      result.push(`${cells[1]} (${cells[2] || ''})`);
     }
   }
+  return result;
+}
 
-  // Extract tags — derive from summary + file types + key decisions
+function extractOutcomeFromReview(contextData) {
+  if (!contextData['review-report.md']) return null;
+  const rrContent = contextData['review-report.md'].content;
+  const verdictMatch = rrContent.match(/## Verdict\s*\n([\s\S]*?)(?=\n##|$)/);
+  if (!verdictMatch) return null;
+  const rawVerdict = verdictMatch[1].trim();
+  if (!rawVerdict || rawVerdict.startsWith('(To be filled')) return null;
+  return rawVerdict.split('\n')[0].slice(0, 200);
+}
+
+function extractOutcomeFromGit(contextData) {
+  if (!contextData['git-status.md']) return null;
+  const gsHeaders = contextData['git-status.md'].headers;
+  if (!gsHeaders.branch_name || gsHeaders.branch_name === '(To be filled by Git Manager)') return null;
+  let outcome = `Branch: ${gsHeaders.branch_name}`;
+  const gsContent = contextData['git-status.md'].content;
+  const pushMatch = gsContent.match(/## Push Status\s*\n([\s\S]*?)(?=\n##|$)/);
+  if (pushMatch) {
+    const pushText = pushMatch[1].trim();
+    if (pushText && pushText !== '(Not pushed)') {
+      outcome += `. ${pushText.split('\n')[0]}`;
+    }
+  }
+  return outcome;
+}
+
+function extractOutcome(contextData) {
+  return extractOutcomeFromReview(contextData)
+    || extractOutcomeFromGit(contextData)
+    || '(no outcome recorded)';
+}
+
+function calcDuration(started) {
+  if (!started || started === '(none)' || started === '(pending)') return '(unknown)';
+  try {
+    const startDate = new Date(started);
+    const diffMs = Date.now() - startDate.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    if (diffMins < 60) return `${diffMins}m`;
+    return `${Math.floor(diffMins / 60)}h ${diffMins % 60}m`;
+  } catch { return '(unknown)'; }
+}
+
+function cleanupCheckpoints() {
+  if (!fileExists(CHECKPOINTS_DIR)) return;
+  try {
+    const dirs = fs.readdirSync(CHECKPOINTS_DIR, { withFileTypes: true });
+    for (const d of dirs) {
+      if (d.isDirectory() && d.name.startsWith('phase-')) {
+        fs.rmSync(path.join(CHECKPOINTS_DIR, d.name), { recursive: true, force: true });
+      }
+    }
+  } catch { /* ignore cleanup errors */ }
+}
+
+function cmdArchive() {
+  const isAbandoned = process.argv.includes('--abandoned');
+
+  const statusPath = path.join(CONTEXT_DIR, 'task-status.md');
+  if (!fileExists(statusPath)) fail('No task-status.md found. Nothing to archive.');
+
+  const statusContent = readFileContent(statusPath);
+  if (!statusContent) fail('task-status.md is empty or unreadable.');
+
+  const statusHeaders = parseContextHeaders(statusContent);
+  const taskId = statusHeaders.task_id;
+
+  if (!taskId || taskId === '(none)') fail('No active task to archive. task-status.md has no Task ID.');
+  if (statusHeaders.status === 'idle') fail('Task is already idle. Nothing to archive.');
+
+  const archiveStatus = isAbandoned ? 'abandoned' : 'completed';
+  const contextData = gatherContextData();
+  const summary = extractSummary(contextData);
+  const filesChanged = extractFilesChanged(contextData);
+  const decisions = extractDecisions(contextData);
   const tags = deriveTaskTags(summary, filesChanged, decisions, contextData);
+  const outcome = extractOutcome(contextData);
+  const duration = calcDuration(statusHeaders.started);
+  const codebaseRefreshNeeded = filesChanged.length > 0;
 
-  // Extract outcome from review-report.md or git-status.md
-  let outcome = '(no outcome recorded)';
-  if (contextData['review-report.md']) {
-    const rrContent = contextData['review-report.md'].content;
-    const verdictMatch = rrContent.match(/## Verdict\s*\n([\s\S]*?)(?=\n##|$)/);
-    if (verdictMatch) {
-      const rawVerdict = verdictMatch[1].trim();
-      if (rawVerdict && !rawVerdict.startsWith('(To be filled')) {
-        outcome = rawVerdict.split('\n')[0].slice(0, 200);
-      }
-    }
-  }
-  if (outcome === '(no outcome recorded)' && contextData['git-status.md']) {
-    const gsContent = contextData['git-status.md'].content;
-    const gsHeaders = contextData['git-status.md'].headers;
-    if (gsHeaders.branch_name && gsHeaders.branch_name !== '(To be filled by Git Manager)') {
-      outcome = `Branch: ${gsHeaders.branch_name}`;
-      const pushMatch = gsContent.match(/## Push Status\s*\n([\s\S]*?)(?=\n##|$)/);
-      if (pushMatch) {
-        const pushText = pushMatch[1].trim();
-        if (pushText && pushText !== '(Not pushed)') {
-          outcome += `. ${pushText.split('\n')[0]}`;
-        }
-      }
-    }
-  }
-
-  // Determine final phase reached
-  const finalPhase = statusHeaders.current_phase || '(unknown)';
-
-  // Calculate duration
-  const started = statusHeaders.started;
-  let duration = '(unknown)';
-  if (started && started !== '(none)' && started !== '(pending)') {
-    try {
-      const startDate = new Date(started);
-      const endDate = new Date();
-      const diffMs = endDate.getTime() - startDate.getTime();
-      const diffMins = Math.floor(diffMs / 60000);
-      if (diffMins < 60) {
-        duration = `${diffMins}m`;
-      } else {
-        const hours = Math.floor(diffMins / 60);
-        const mins = diffMins % 60;
-        duration = `${hours}h ${mins}m`;
-      }
-    } catch {
-      // ignore date errors
-    }
-  }
-
-  // ── Generate manifest.md ──
-
+  // Generate manifest
   const filesChangedSection = filesChanged.length > 0
     ? filesChanged.map((f) => `- ${f.action}: \`${f.file}\``).join('\n')
     : '(no files changed)';
-
   const decisionsSection = decisions.length > 0
     ? decisions.map((d, i) => `${i + 1}. ${d}`).join('\n')
     : '(no decisions recorded)';
@@ -913,7 +979,7 @@ function cmdArchive() {
 **Date**: ${today()}
 **Status**: ${archiveStatus}
 **Duration**: ${duration}
-**Final Phase Reached**: ${finalPhase}
+**Final Phase Reached**: ${statusHeaders.current_phase || '(unknown)'}
 
 ## Summary
 ${summary}
@@ -931,55 +997,32 @@ ${tags.join(', ')}
 ${outcome}
 `;
 
-  // ── Create archive folder and move files ──
-
+  // Create archive folder and move files
   const archiveFolderPath = path.join(ARCHIVE_DIR, taskId);
   ensureDir(archiveFolderPath);
-
-  // Write manifest first
   writeFile(path.join(archiveFolderPath, 'manifest.md'), manifestContent);
 
-  // Move all task-level context files (NOT codebase-intel.md)
   let filesMoved = 0;
   for (const filename of TASK_LEVEL_FILES) {
     const srcPath = path.join(CONTEXT_DIR, filename);
     if (fileExists(srcPath)) {
-      const content = readFileContent(srcPath);
-      writeFile(path.join(archiveFolderPath, filename), content);
+      writeFile(path.join(archiveFolderPath, filename), readFileContent(srcPath));
       fs.unlinkSync(srcPath);
       filesMoved++;
     }
   }
 
-  // ── Append to task-index.md ──
-
+  // Append to task-index.md
   const indexPath = path.join(ARCHIVE_DIR, 'task-index.md');
-  if (!fileExists(indexPath)) {
-    writeFile(indexPath, TASK_INDEX_INITIAL);
-  }
-
-  const indexEntry = `| ${taskId} | ${today()} | ${archiveStatus} | ${summary.slice(0, 60)} | ${filesChangedCount} files | ${tags.join(', ')} |`;
+  if (!fileExists(indexPath)) writeFile(indexPath, TASK_INDEX_INITIAL);
+  const indexEntry = `| ${taskId} | ${today()} | ${archiveStatus} | ${summary.slice(0, 60)} | ${filesChanged.length} files | ${tags.join(', ')} |`;
   const indexContent = readFileContent(indexPath);
   writeFile(indexPath, indexContent.trimEnd() + '\n' + indexEntry + '\n');
 
-  // ── Clean up checkpoints ──
+  // Clean up checkpoints
+  cleanupCheckpoints();
 
-  if (fileExists(CHECKPOINTS_DIR)) {
-    try {
-      const dirs = fs.readdirSync(CHECKPOINTS_DIR, { withFileTypes: true });
-      for (const d of dirs) {
-        if (d.isDirectory() && d.name.startsWith('phase-')) {
-          const checkpointPath = path.join(CHECKPOINTS_DIR, d.name);
-          fs.rmSync(checkpointPath, { recursive: true, force: true });
-        }
-      }
-    } catch {
-      // ignore cleanup errors
-    }
-  }
-
-  // ── Reset task-status.md to idle ──
-
+  // Reset task-status.md to idle
   const idleStatus = `# Task Status
 
 **Task ID**: (none)
@@ -996,7 +1039,6 @@ ${outcome}
 | Phase | Started | Completed | Agent | Notes |
 |-------|---------|-----------|-------|-------|
 `;
-
   writeFile(path.join(CONTEXT_DIR, 'task-status.md'), idleStatus);
 
   output({
@@ -1032,7 +1074,7 @@ function deriveTaskTags(summary, filesChanged, decisions, contextData) {
   if (summary && summary !== '(no summary)') {
     const words = summary
       .toLowerCase()
-      .replace(/[^a-z0-9\s-]/g, '')
+      .replaceAll(/[^a-z0-9\s-]/g, '')
       .split(/\s+/)
       .filter((w) => w.length >= 3 && !stopWords.has(w));
     // Take top 5 meaningful words
@@ -1179,6 +1221,128 @@ const PHASE_PREREQUISITES = {
   8: ['task-status.md', 'requirements.md', 'implementation-plan.md', 'code-changes.md', 'test-results.md', 'review-report.md', 'git-status.md'], // Phase 8: COMPLETE
 };
 
+function checkTaskIdConsistency(activeTaskId) {
+  const results = [];
+  for (const filename of TASK_LEVEL_FILES) {
+    if (filename === 'task-status.md') continue;
+    const filePath = path.join(CONTEXT_DIR, filename);
+    if (!fileExists(filePath)) continue;
+    const content = readFileContent(filePath);
+    if (!content) continue;
+    const headers = parseContextHeaders(content);
+    if (headers.task_id && headers.task_id !== '(pending)' && headers.task_id !== activeTaskId) {
+      results.push({ file: filename, expected: activeTaskId, found: headers.task_id });
+    }
+  }
+  return results;
+}
+
+function checkRequiredSections() {
+  const results = [];
+  for (const [filename, requirements] of Object.entries(REQUIRED_SECTIONS)) {
+    const filePath = path.join(CONTEXT_DIR, filename);
+    if (!fileExists(filePath)) continue;
+    const content = readFileContent(filePath);
+    if (!content) { results.push({ file: filename, missing: 'entire file content (empty)' }); continue; }
+    const headers = parseContextHeaders(content);
+    const contentLower = content.toLowerCase();
+    for (const req of requirements) {
+      let found = false;
+      if (req.check === 'header') {
+        const val = headers[req.headerKey];
+        found = val && val !== '(pending)' && val !== '(none)' && val !== '';
+      } else if (req.check === 'heading') {
+        found = contentLower.includes(req.heading.toLowerCase());
+      }
+      if (!found) results.push({ file: filename, missing: req.key });
+    }
+  }
+  return results;
+}
+
+function collectFileTimestamps() {
+  const timestamps = {};
+  for (const filename of TASK_LEVEL_FILES) {
+    const filePath = path.join(CONTEXT_DIR, filename);
+    if (!fileExists(filePath)) continue;
+    const content = readFileContent(filePath);
+    if (!content) continue;
+    const headers = parseContextHeaders(content);
+    const ts = headers.last_updated;
+    if (ts && ts !== '(pending)' && ts !== '(none)') {
+      try {
+        const date = new Date(ts);
+        if (!Number.isNaN(date.getTime())) timestamps[filename] = date;
+      } catch { /* ignore */ }
+    }
+  }
+  return timestamps;
+}
+
+function checkStaleness(fileTimestamps) {
+  const results = [];
+  for (const [upstream, downstream, description] of STALENESS_CASCADE) {
+    const upTs = fileTimestamps[upstream];
+    const downTs = fileTimestamps[downstream];
+    if (upTs && downTs && upTs > downTs) {
+      results.push({ upstream, downstream, description, upstream_ts: upTs.toISOString(), downstream_ts: downTs.toISOString() });
+    }
+  }
+  return results;
+}
+
+function checkPhaseSequence(phaseNum) {
+  if (phaseNum === null || !PHASE_PREREQUISITES[phaseNum]) return [];
+  const results = [];
+  for (const filename of PHASE_PREREQUISITES[phaseNum]) {
+    if (!fileExists(path.join(CONTEXT_DIR, filename))) {
+      results.push({ phase: phaseNum, missing_file: filename });
+    }
+  }
+  return results;
+}
+
+function checkContentHashes(phaseNum) {
+  if (phaseNum === null || phaseNum <= 1) return [];
+  const hashFilePath = path.join(CHECKPOINTS_DIR, `phase-${phaseNum - 1}-complete`, '.hashes.json');
+  if (!fileExists(hashFilePath)) return [];
+  const results = [];
+  try {
+    const prevHashes = JSON.parse(readFileContent(hashFilePath));
+    for (const [key, prevHash] of Object.entries(prevHashes)) {
+      const filename = key.endsWith('.md') ? key : key + '.md';
+      const currentPath = path.join(CONTEXT_DIR, filename);
+      if (fileExists(currentPath)) {
+        const currentHash = hashSection(readFileContent(currentPath));
+        if (currentHash !== prevHash) results.push({ file: filename, previous_hash: prevHash, current_hash: currentHash });
+      }
+    }
+  } catch { /* ignore */ }
+  return results;
+}
+
+function buildValidationSuggestion(checks, errors, phaseNum, stalenessErrors, sectionErrors, phaseSequenceErrors) {
+  if (errors.length === 0) return 'All checks passed. Safe to proceed with delegation.';
+  if (checks.task_id === 'fail') return 'Task ID mismatch detected — possible context contamination. Options: restore from checkpoint, or archive and start fresh.';
+  if (checks.staleness === 'fail') {
+    const phaseMap = { 'implementation-plan.md': 'Phase 3 (planning)', 'code-changes.md': 'Phase 4 (development)', 'test-results.md': 'Phase 5 (testing)', 'review-report.md': 'Phase 6 (review)' };
+    const phasesToRerun = [...new Set(stalenessErrors.map((e) => phaseMap[e.downstream]).filter(Boolean))];
+    return `Stale context detected. Re-run ${phasesToRerun.join(' and ')} to refresh against updated upstream files.`;
+  }
+  if (checks.sections === 'fail') {
+    return `Missing required sections in: ${[...new Set(sectionErrors.map((e) => e.file))].join(', ')}. The owning agents need to complete these sections before proceeding.`;
+  }
+  if (checks.phase_sequence === 'fail') {
+    return `Phase ${phaseNum} requires files that don't exist yet: ${phaseSequenceErrors.map((e) => e.missing_file).join(', ')}. Complete earlier phases first.`;
+  }
+  const issueTypes = [];
+  if (checks.task_id === 'fail') issueTypes.push('Task ID mismatch');
+  if (checks.sections === 'fail') issueTypes.push('missing sections');
+  if (checks.staleness === 'fail') issueTypes.push('stale files');
+  if (checks.phase_sequence === 'fail') issueTypes.push('missing prerequisite files');
+  return `Multiple issues detected: ${issueTypes.join(', ')}. Review errors and address each before proceeding.`;
+}
+
 function cmdValidate() {
   const errors = [];
   const checks = {
@@ -1219,240 +1383,51 @@ function cmdValidate() {
     return;
   }
 
-  // Parse phase number
   let phaseNum = null;
   const phaseMatch = currentPhase.match(/Phase\s+(\d+)/i);
-  if (phaseMatch) {
-    phaseNum = parseInt(phaseMatch[1], 10);
-  }
+  if (phaseMatch) phaseNum = Number.parseInt(phaseMatch[1], 10);
 
-  // ── CHECK 1: Task ID consistency ──
-  // All existing context files must have the same Task ID as task-status.md
-
-  const filesWithWrongId = [];
-  for (const filename of TASK_LEVEL_FILES) {
-    if (filename === 'task-status.md') continue; // Already have this
-    const filePath = path.join(CONTEXT_DIR, filename);
-    if (!fileExists(filePath)) continue; // File doesn't exist yet — not an error here
-
-    const content = readFileContent(filePath);
-    if (!content) continue;
-
-    const headers = parseContextHeaders(content);
-    const fileTaskId = headers.task_id;
-
-    if (fileTaskId && fileTaskId !== '(pending)' && fileTaskId !== activeTaskId) {
-      filesWithWrongId.push({
-        file: filename,
-        expected: activeTaskId,
-        found: fileTaskId,
-      });
-    }
-  }
-
+  // CHECK 1: Task ID consistency
+  const filesWithWrongId = checkTaskIdConsistency(activeTaskId);
   if (filesWithWrongId.length > 0) {
     checks.task_id = 'fail';
-    for (const f of filesWithWrongId) {
-      errors.push({
-        check: 'task_id',
-        message: `${f.file} has Task ID "${f.found}" but active task is "${f.expected}"`,
-        file: f.file,
-      });
-    }
+    filesWithWrongId.forEach((f) => errors.push({ check: 'task_id', message: `${f.file} has Task ID "${f.found}" but active task is "${f.expected}"`, file: f.file }));
   }
 
-  // ── CHECK 2: Required sections ──
-  // Each existing context file must have its minimum-fidelity invariants
-
-  const sectionErrors = [];
-  for (const [filename, requirements] of Object.entries(REQUIRED_SECTIONS)) {
-    const filePath = path.join(CONTEXT_DIR, filename);
-    if (!fileExists(filePath)) continue; // File doesn't exist — checked in phase sequence
-
-    const content = readFileContent(filePath);
-    if (!content) {
-      sectionErrors.push({ file: filename, missing: 'entire file content (empty)' });
-      continue;
-    }
-
-    const headers = parseContextHeaders(content);
-    const contentLower = content.toLowerCase();
-
-    for (const req of requirements) {
-      let found = false;
-
-      if (req.check === 'header') {
-        // Check that the header key exists and has a non-placeholder value
-        const val = headers[req.headerKey];
-        found = val && val !== '(pending)' && val !== '(none)' && val !== '';
-      } else if (req.check === 'heading') {
-        // Check that the heading exists in the file (case-insensitive)
-        found = contentLower.includes(req.heading.toLowerCase());
-      }
-
-      if (!found) {
-        sectionErrors.push({ file: filename, missing: req.key });
-      }
-    }
-  }
-
+  // CHECK 2: Required sections
+  const sectionErrors = checkRequiredSections();
   if (sectionErrors.length > 0) {
     checks.sections = 'fail';
-    for (const e of sectionErrors) {
-      errors.push({
-        check: 'sections',
-        message: `${e.file} missing required section: "${e.missing}"`,
-        file: e.file,
-      });
-    }
+    sectionErrors.forEach((e) => errors.push({ check: 'sections', message: `${e.file} missing required section: "${e.missing}"`, file: e.file }));
   }
 
-  // ── CHECK 3: Staleness ──
-  // Upstream files should have timestamps ≤ downstream files.
-  // If upstream was updated AFTER downstream, downstream is stale.
-
-  const fileTimestamps = {};
-  for (const filename of TASK_LEVEL_FILES) {
-    const filePath = path.join(CONTEXT_DIR, filename);
-    if (!fileExists(filePath)) continue;
-
-    const content = readFileContent(filePath);
-    if (!content) continue;
-
-    const headers = parseContextHeaders(content);
-    const ts = headers.last_updated;
-    if (ts && ts !== '(pending)' && ts !== '(none)') {
-      try {
-        const date = new Date(ts);
-        if (!isNaN(date.getTime())) {
-          fileTimestamps[filename] = date;
-        }
-      } catch {
-        // ignore bad dates
-      }
-    }
-  }
-
-  const stalenessErrors = [];
-  for (const [upstream, downstream, description] of STALENESS_CASCADE) {
-    const upTs = fileTimestamps[upstream];
-    const downTs = fileTimestamps[downstream];
-
-    // Only check if both files exist and have valid timestamps
-    if (upTs && downTs && upTs > downTs) {
-      stalenessErrors.push({
-        upstream,
-        downstream,
-        upstream_ts: upTs.toISOString(),
-        downstream_ts: downTs.toISOString(),
-        description,
-      });
-    }
-  }
-
+  // CHECK 3: Staleness
+  const fileTimestamps = collectFileTimestamps();
+  const stalenessErrors = checkStaleness(fileTimestamps);
   if (stalenessErrors.length > 0) {
     checks.staleness = 'fail';
-    for (const e of stalenessErrors) {
-      errors.push({
-        check: 'staleness',
-        message: `${e.downstream} is older than ${e.upstream} — ${e.description}`,
-        upstream: e.upstream,
-        downstream: e.downstream,
-      });
-    }
+    stalenessErrors.forEach((e) => errors.push({ check: 'staleness', message: `${e.downstream} is older than ${e.upstream} — ${e.description}`, upstream: e.upstream, downstream: e.downstream }));
   }
 
-  // ── CHECK 4: Phase sequence ──
-  // Current phase must have all prerequisite files present
-
-  const phaseSequenceErrors = [];
-  if (phaseNum !== null && PHASE_PREREQUISITES[phaseNum]) {
-    const required = PHASE_PREREQUISITES[phaseNum];
-    for (const filename of required) {
-      const filePath = path.join(CONTEXT_DIR, filename);
-      if (!fileExists(filePath)) {
-        phaseSequenceErrors.push({
-          phase: phaseNum,
-          missing_file: filename,
-        });
-      }
-    }
-  }
-
+  // CHECK 4: Phase sequence
+  const phaseSequenceErrors = checkPhaseSequence(phaseNum);
   if (phaseSequenceErrors.length > 0) {
     checks.phase_sequence = 'fail';
-    for (const e of phaseSequenceErrors) {
-      errors.push({
-        check: 'phase_sequence',
-        message: `Phase ${e.phase} requires ${e.missing_file} but it does not exist`,
-        phase: e.phase,
-        file: e.missing_file,
-      });
-    }
+    phaseSequenceErrors.forEach((e) => errors.push({ check: 'phase_sequence', message: `Phase ${e.phase} requires ${e.missing_file} but it does not exist`, phase: e.phase, file: e.missing_file }));
   }
 
-  // ── Determine recoverability and build suggestion ──
+  // CHECK 5: Content hash change detection
+  const contentChanges = checkContentHashes(phaseNum);
 
   const valid = errors.length === 0;
-  let recoverable = true;
-  let suggestion = '';
-
-  if (valid) {
-    suggestion = 'All checks passed. Safe to proceed with delegation.';
-  } else {
-    // Determine recoverable based on error types
-    const hasTaskIdMismatch = checks.task_id === 'fail';
-    const hasMissingSections = checks.sections === 'fail';
-    const hasStaleness = checks.staleness === 'fail';
-    const hasMissingPrereqs = checks.phase_sequence === 'fail';
-
-    // Task ID mismatch is potentially non-recoverable (contamination)
-    if (hasTaskIdMismatch) {
-      recoverable = false;
-      suggestion = 'Task ID mismatch detected — possible context contamination. Options: restore from checkpoint, or archive and start fresh.';
-    }
-
-    // Staleness is recoverable (re-run the stale phase)
-    if (hasStaleness && !hasTaskIdMismatch) {
-      // Find which phase to re-run based on the stale downstream file
-      const staleFiles = stalenessErrors.map((e) => e.downstream);
-      const phaseMap = {
-        'implementation-plan.md': 'Phase 3 (planning)',
-        'code-changes.md': 'Phase 4 (development)',
-        'test-results.md': 'Phase 5 (testing)',
-        'review-report.md': 'Phase 6 (review)',
-      };
-      const phasesToRerun = [...new Set(staleFiles.map((f) => phaseMap[f]).filter(Boolean))];
-      suggestion = `Stale context detected. Re-run ${phasesToRerun.join(' and ')} to refresh against updated upstream files.`;
-    }
-
-    // Missing sections is recoverable (agent needs to fill them)
-    if (hasMissingSections && !hasTaskIdMismatch && !hasStaleness) {
-      const affectedFiles = [...new Set(sectionErrors.map((e) => e.file))];
-      suggestion = `Missing required sections in: ${affectedFiles.join(', ')}. The owning agents need to complete these sections before proceeding.`;
-    }
-
-    // Missing phase prerequisites is recoverable
-    if (hasMissingPrereqs && !hasTaskIdMismatch && !hasStaleness && !hasMissingSections) {
-      const missingFiles = phaseSequenceErrors.map((e) => e.missing_file);
-      suggestion = `Phase ${phaseNum} requires files that don't exist yet: ${missingFiles.join(', ')}. Complete earlier phases first.`;
-    }
-
-    // Combined issues — build a composite suggestion
-    if (!suggestion) {
-      const issueTypes = [];
-      if (hasTaskIdMismatch) issueTypes.push('Task ID mismatch');
-      if (hasMissingSections) issueTypes.push('missing sections');
-      if (hasStaleness) issueTypes.push('stale files');
-      if (hasMissingPrereqs) issueTypes.push('missing prerequisite files');
-      suggestion = `Multiple issues detected: ${issueTypes.join(', ')}. Review errors and address each before proceeding.`;
-    }
-  }
+  const recoverable = checks.task_id !== 'fail';
+  const suggestion = buildValidationSuggestion(checks, errors, phaseNum, stalenessErrors, sectionErrors, phaseSequenceErrors);
 
   output({
     valid,
     checks,
     errors: errors.length > 0 ? errors : undefined,
+    content_changes: contentChanges.length > 0 ? contentChanges : undefined,
     recoverable,
     suggestion,
   });
@@ -1463,6 +1438,11 @@ function cmdValidate() {
 // Copies ALL current context files to a checkpoint folder.
 // Called by Coordinator after each phase gate approval.
 // ─────────────────────────────────────────────────────────
+
+// Enhancement B: Content hashing helper
+function hashSection(content) {
+  return crypto.createHash('md5').update(content || '').digest('hex').slice(0, 8);
+}
 
 /** Phase number → human-readable name map */
 const PHASE_NAMES = {
@@ -1482,8 +1462,8 @@ function cmdCheckpoint() {
     fail('Usage: context-tool checkpoint <phase-number>');
   }
 
-  const phaseNum = parseInt(phaseArg, 10);
-  if (isNaN(phaseNum) || phaseNum < 1 || phaseNum > 8) {
+  const phaseNum = Number.parseInt(phaseArg, 10);
+  if (Number.isNaN(phaseNum) || phaseNum < 1 || phaseNum > 8) {
     fail(`Invalid phase number: "${phaseArg}". Must be 1-8.`);
   }
 
@@ -1533,6 +1513,16 @@ function cmdCheckpoint() {
     copiedFiles.push(PERSISTENT_FILE);
   }
 
+  // Enhancement B: Write content hashes for key sections
+  const hashes = {};
+  for (const filename of copiedFiles) {
+    const content = readFileContent(path.join(checkpointDir, filename));
+    if (content) {
+      hashes[filename.replace('.md', '')] = hashSection(content);
+    }
+  }
+  writeFile(path.join(checkpointDir, '.hashes.json'), JSON.stringify(hashes, null, 2));
+
   // Log checkpoint in task-status.md by appending a note
   const timestamp = now();
   const checkpointNote = `\n> **Checkpoint**: ${checkpointName} created at ${timestamp} (${copiedFiles.length} files)\n`;
@@ -1545,6 +1535,7 @@ function cmdCheckpoint() {
     phase_name: PHASE_NAMES[phaseNum] || 'UNKNOWN',
     files_copied: copiedFiles.length,
     copied_files: copiedFiles,
+    hashes_written: Object.keys(hashes).length,
     timestamp,
   });
 }
@@ -1557,14 +1548,31 @@ function cmdCheckpoint() {
 // (i.e., rollback to phase-3-complete → current phase = 4).
 // ─────────────────────────────────────────────────────────
 
+function deleteCheckpointsAfter(phaseNum) {
+  const deleted = [];
+  if (!fileExists(CHECKPOINTS_DIR)) return deleted;
+  try {
+    const dirs = fs.readdirSync(CHECKPOINTS_DIR, { withFileTypes: true });
+    for (const d of dirs) {
+      if (!d.isDirectory() || !d.name.startsWith('phase-')) continue;
+      const match = d.name.match(/phase-(\d+)-complete/);
+      if (match && Number.parseInt(match[1], 10) > phaseNum) {
+        fs.rmSync(path.join(CHECKPOINTS_DIR, d.name), { recursive: true, force: true });
+        deleted.push(d.name);
+      }
+    }
+  } catch { /* ignore */ }
+  return deleted;
+}
+
 function cmdRollback() {
   const phaseArg = process.argv[3];
   if (!phaseArg) {
     fail('Usage: context-tool rollback <phase-number>');
   }
 
-  const phaseNum = parseInt(phaseArg, 10);
-  if (isNaN(phaseNum) || phaseNum < 1 || phaseNum > 8) {
+  const phaseNum = Number.parseInt(phaseArg, 10);
+  if (Number.isNaN(phaseNum) || phaseNum < 1 || phaseNum > 8) {
     fail(`Invalid phase number: "${phaseArg}". Must be 1-8.`);
   }
 
@@ -1586,18 +1594,7 @@ function cmdRollback() {
   const checkpointDir = path.join(CHECKPOINTS_DIR, checkpointName);
 
   if (!fileExists(checkpointDir)) {
-    // List available checkpoints for helpful error
-    const available = [];
-    if (fileExists(CHECKPOINTS_DIR)) {
-      try {
-        const dirs = fs.readdirSync(CHECKPOINTS_DIR, { withFileTypes: true });
-        for (const d of dirs) {
-          if (d.isDirectory() && d.name.startsWith('phase-')) {
-            available.push(d.name);
-          }
-        }
-      } catch { /* ignore */ }
-    }
+    const available = listCheckpoints();
     fail(
       `Checkpoint "${checkpointName}" not found. ` +
       (available.length > 0
@@ -1622,24 +1619,7 @@ function cmdRollback() {
   }
 
   // Delete checkpoints AFTER the target phase
-  const deletedCheckpoints = [];
-  if (fileExists(CHECKPOINTS_DIR)) {
-    try {
-      const dirs = fs.readdirSync(CHECKPOINTS_DIR, { withFileTypes: true });
-      for (const d of dirs) {
-        if (d.isDirectory() && d.name.startsWith('phase-')) {
-          const match = d.name.match(/phase-(\d+)-complete/);
-          if (match) {
-            const cpPhase = parseInt(match[1], 10);
-            if (cpPhase > phaseNum) {
-              fs.rmSync(path.join(CHECKPOINTS_DIR, d.name), { recursive: true, force: true });
-              deletedCheckpoints.push(d.name);
-            }
-          }
-        }
-      }
-    } catch { /* ignore */ }
-  }
+  const deletedCheckpoints = deleteCheckpointsAfter(phaseNum);
 
   // Determine the phase we're rolling back TO (the next phase after checkpoint)
   const nextPhase = phaseNum + 1;
@@ -1707,7 +1687,7 @@ function parseTaskIndex() {
     // Split on | but keep empty cells (don't filter(Boolean) — tags can be empty)
     const rawCells = trimmed.split('|').map((c) => c.trim());
     // Remove leading/trailing empty strings from split
-    const cells = rawCells.slice(1, rawCells.length - 1);
+    const cells = rawCells.slice(1, -1);
     if (cells.length < 5) continue;
 
     rows.push({
@@ -1723,17 +1703,75 @@ function parseTaskIndex() {
   return rows;
 }
 
+function enrichWithManifest(match) {
+  const manifestPath = path.join(ARCHIVE_DIR, match.task_id, 'manifest.md');
+  const result = {
+    task_id: match.task_id,
+    date: match.date,
+    status: match.status,
+    summary: match.summary,
+    tags: match.tags,
+    files_changed: match.files_changed,
+    archive_path: `.github/context/archive/${match.task_id}/`,
+  };
+  if (fileExists(manifestPath)) {
+    const manifestContent = readFileContent(manifestPath);
+    if (manifestContent) {
+      result.has_manifest = true;
+      const summaryMatch = manifestContent.match(/## Summary\s*\n([\s\S]*?)(?=\n## |\n$)/);
+      if (summaryMatch) result.full_summary = summaryMatch[1].trim();
+      const outcomeMatch = manifestContent.match(/## Outcome\s*\n([\s\S]*?)(?=\n## |\n$)/);
+      if (outcomeMatch) result.outcome = outcomeMatch[1].trim();
+    }
+  }
+  return result;
+}
+
+function parseManifestResult(dirName, manifestContent) {
+  const headers = parseContextHeaders(manifestContent);
+  const summaryMatch = manifestContent.match(/## Summary\s*\n([\s\S]*?)(?=\n## |\n$)/);
+  const outcomeMatch = manifestContent.match(/## Outcome\s*\n([\s\S]*?)(?=\n## |\n$)/);
+  const tagsMatch = manifestContent.match(/## Tags\s*\n(.*)/);
+  return {
+    task_id: headers.task_id || dirName,
+    date: headers.date || 'unknown',
+    status: headers.status || 'unknown',
+    summary: summaryMatch ? summaryMatch[1].trim().slice(0, 80) : dirName,
+    tags: tagsMatch ? tagsMatch[1].split(',').map((t) => t.trim()).filter(Boolean) : [],
+    files_changed: 'see manifest',
+    archive_path: `.github/context/archive/${dirName}/`,
+    has_manifest: true,
+    full_summary: summaryMatch ? summaryMatch[1].trim() : undefined,
+    outcome: outcomeMatch ? outcomeMatch[1].trim() : undefined,
+    match_source: 'manifest_deep_search',
+  };
+}
+
+function deepManifestSearch(queryTerms) {
+  const results = [];
+  if (!fileExists(ARCHIVE_DIR)) return results;
+  try {
+    const archiveDirs = fs.readdirSync(ARCHIVE_DIR, { withFileTypes: true });
+    for (const d of archiveDirs) {
+      if (!d.isDirectory() || !d.name.startsWith('TASK-')) continue;
+      const manifestPath = path.join(ARCHIVE_DIR, d.name, 'manifest.md');
+      if (!fileExists(manifestPath)) continue;
+      const manifestContent = readFileContent(manifestPath);
+      if (!manifestContent) continue;
+      const manifestLower = manifestContent.toLowerCase();
+      if (!queryTerms.every((term) => manifestLower.includes(term))) continue;
+      results.push(parseManifestResult(d.name, manifestContent));
+    }
+  } catch { /* ignore directory read errors */ }
+  return results;
+}
+
 function cmdSearch() {
   const query = process.argv.slice(3).join(' ').trim();
-  if (!query) {
-    fail('Usage: context-tool search <query>');
-  }
+  if (!query) fail('Usage: context-tool search <query>');
 
-  // Check setup
   const indexPath = path.join(ARCHIVE_DIR, 'task-index.md');
-  if (!fileExists(indexPath)) {
-    fail('No task-index.md found. Run setup first or complete at least one task.');
-  }
+  if (!fileExists(indexPath)) fail('No task-index.md found. Run setup first or complete at least one task.');
 
   const queryLower = query.toLowerCase();
   const queryTerms = queryLower.split(/\s+/);
@@ -1744,94 +1782,18 @@ function cmdSearch() {
     return;
   }
 
-  // Phase 1: Search task-index.md rows (fast — single file)
-  const indexMatches = [];
-  for (const row of rows) {
-    const searchable = [
-      row.task_id,
-      row.date,
-      row.status,
-      row.summary,
-      row.files_changed,
-      row.tags.join(' '),
-    ].join(' ').toLowerCase();
+  // Phase 1: Search task-index.md rows
+  const indexMatches = rows.filter((row) => {
+    const searchable = [row.task_id, row.date, row.status, row.summary, row.files_changed, row.tags.join(' ')].join(' ').toLowerCase();
+    return queryTerms.every((term) => searchable.includes(term));
+  });
 
-    // All query terms must match (AND logic for multi-word queries)
-    const allTermsMatch = queryTerms.every((term) => searchable.includes(term));
-    if (allTermsMatch) {
-      indexMatches.push(row);
-    }
-  }
+  // Phase 2: Enrich with manifest data
+  let results = indexMatches.map(enrichWithManifest);
 
-  // Phase 2: For index matches, enrich with manifest data if available
-  const results = [];
-  for (const match of indexMatches) {
-    const archivePath = path.join(ARCHIVE_DIR, match.task_id);
-    const manifestPath = path.join(archivePath, 'manifest.md');
-    const result = {
-      task_id: match.task_id,
-      date: match.date,
-      status: match.status,
-      summary: match.summary,
-      tags: match.tags,
-      files_changed: match.files_changed,
-      archive_path: `.github/context/archive/${match.task_id}/`,
-    };
-
-    // Try to read manifest for richer data
-    if (fileExists(manifestPath)) {
-      const manifestContent = readFileContent(manifestPath);
-      if (manifestContent) {
-        result.has_manifest = true;
-        // Extract key sections from manifest
-        const summaryMatch = manifestContent.match(/## Summary\s*\n([\s\S]*?)(?=\n## |\n$)/);
-        if (summaryMatch) result.full_summary = summaryMatch[1].trim();
-        const outcomeMatch = manifestContent.match(/## Outcome\s*\n([\s\S]*?)(?=\n## |\n$)/);
-        if (outcomeMatch) result.outcome = outcomeMatch[1].trim();
-      }
-    }
-
-    results.push(result);
-  }
-
-  // Phase 3: If no index matches, do a deeper search across manifests
-  if (results.length === 0 && fileExists(ARCHIVE_DIR)) {
-    try {
-      const archiveDirs = fs.readdirSync(ARCHIVE_DIR, { withFileTypes: true });
-      for (const d of archiveDirs) {
-        if (!d.isDirectory() || !d.name.startsWith('TASK-')) continue;
-
-        const manifestPath = path.join(ARCHIVE_DIR, d.name, 'manifest.md');
-        if (!fileExists(manifestPath)) continue;
-
-        const manifestContent = readFileContent(manifestPath);
-        if (!manifestContent) continue;
-
-        const manifestLower = manifestContent.toLowerCase();
-        const allTermsMatch = queryTerms.every((term) => manifestLower.includes(term));
-        if (!allTermsMatch) continue;
-
-        // Parse manifest headers
-        const headers = parseContextHeaders(manifestContent);
-        const summaryMatch = manifestContent.match(/## Summary\s*\n([\s\S]*?)(?=\n## |\n$)/);
-        const outcomeMatch = manifestContent.match(/## Outcome\s*\n([\s\S]*?)(?=\n## |\n$)/);
-        const tagsMatch = manifestContent.match(/## Tags\s*\n(.*)/);
-
-        results.push({
-          task_id: headers.task_id || d.name,
-          date: headers.date || 'unknown',
-          status: headers.status || 'unknown',
-          summary: summaryMatch ? summaryMatch[1].trim().slice(0, 80) : d.name,
-          tags: tagsMatch ? tagsMatch[1].split(',').map((t) => t.trim()).filter(Boolean) : [],
-          files_changed: 'see manifest',
-          archive_path: `.github/context/archive/${d.name}/`,
-          has_manifest: true,
-          full_summary: summaryMatch ? summaryMatch[1].trim() : undefined,
-          outcome: outcomeMatch ? outcomeMatch[1].trim() : undefined,
-          match_source: 'manifest_deep_search',
-        });
-      }
-    } catch { /* ignore directory read errors */ }
+  // Phase 3: If no index matches, do deep manifest search
+  if (results.length === 0) {
+    results = deepManifestSearch(queryTerms);
   }
 
   output({
@@ -1860,8 +1822,8 @@ function cmdHistory() {
   let lastN = 5; // default
   const lastFlag = getFlag('--last');
   if (lastFlag) {
-    const parsed = parseInt(lastFlag, 10);
-    if (isNaN(parsed) || parsed < 1) {
+    const parsed = Number.parseInt(lastFlag, 10);
+    if (Number.isNaN(parsed) || parsed < 1) {
       fail(`Invalid --last value: "${lastFlag}". Must be a positive integer.`);
     }
     lastN = parsed;
@@ -1946,7 +1908,7 @@ function cmdSuspend() {
   let phaseNum = null;
   if (statusHeaders.current_phase) {
     const phaseMatch = statusHeaders.current_phase.match(/Phase\s+(\d+)/i);
-    if (phaseMatch) phaseNum = parseInt(phaseMatch[1], 10);
+    if (phaseMatch) phaseNum = Number.parseInt(phaseMatch[1], 10);
   }
 
   // Create a checkpoint of current state (auto-checkpoint before suspend)
@@ -2055,7 +2017,7 @@ function cmdResume() {
   if (statusHeaders.current_phase) {
     const phaseMatch = statusHeaders.current_phase.match(/Phase\s+(\d+)/i);
     if (phaseMatch) {
-      phaseNum = parseInt(phaseMatch[1], 10);
+      phaseNum = Number.parseInt(phaseMatch[1], 10);
       phaseName = PHASE_NAMES[phaseNum] || 'UNKNOWN';
     }
   }
@@ -2107,41 +2069,7 @@ function cmdResume() {
  * Compact codebase-intel.md by keeping section structure but trimming
  * older/duplicated content. Returns { compacted, before_lines, after_lines }.
  */
-function compactCodebaseIntel() {
-  const filePath = path.join(CONTEXT_DIR, PERSISTENT_FILE);
-  if (!fileExists(filePath)) {
-    return { skipped: true, reason: 'codebase-intel.md not found' };
-  }
-
-  const content = readFileContent(filePath);
-  if (!content) return { skipped: true, reason: 'codebase-intel.md is empty' };
-
-  const lines = content.split('\n');
-  const beforeLines = lines.length;
-
-  if (beforeLines <= CODEBASE_INTEL_MAX_LINES) {
-    return { skipped: true, reason: `${beforeLines} lines (under ${CODEBASE_INTEL_MAX_LINES} threshold)` };
-  }
-
-  // Strategy: Parse into sections (## headings), keep structure.
-  // Within each section, remove lines containing [UPDATED], [OLD], [DEPRECATED].
-  // If still over target, trim each section proportionally.
-  const sections = [];
-  let currentSection = { heading: '', lines: [] };
-
-  for (const line of lines) {
-    if (line.startsWith('## ')) {
-      if (currentSection.heading || currentSection.lines.length > 0) {
-        sections.push(currentSection);
-      }
-      currentSection = { heading: line, lines: [] };
-    } else {
-      currentSection.lines.push(line);
-    }
-  }
-  sections.push(currentSection); // push last section
-
-  // Pass 1: Remove lines with stale markers
+function removeStaleLines(sections) {
   const staleMarkers = ['[UPDATED]', '[OLD]', '[DEPRECATED]', '[REMOVED]', '[SUPERSEDED]'];
   for (const section of sections) {
     section.lines = section.lines.filter((line) => {
@@ -2149,8 +2077,9 @@ function compactCodebaseIntel() {
       return !staleMarkers.some((marker) => upper.includes(marker));
     });
   }
+}
 
-  // Pass 2: Remove consecutive blank lines (keep max 1)
+function removeConsecutiveBlanks(sections) {
   for (const section of sections) {
     const cleaned = [];
     let lastWasBlank = false;
@@ -2162,26 +2091,59 @@ function compactCodebaseIntel() {
     }
     section.lines = cleaned;
   }
+}
 
-  // Check line count after Pass 1+2
+function trimSectionsProportionally(sections, targetLines) {
+  const headingLines = sections.filter((s) => s.heading).length;
+  const availableForContent = targetLines - headingLines - 5;
+  const totalContentLines = sections.reduce((sum, s) => sum + s.lines.length, 0);
+  if (totalContentLines <= 0 || availableForContent <= 0) return;
+  for (const section of sections) {
+    const proportion = section.lines.length / totalContentLines;
+    const allowedLines = Math.max(3, Math.floor(proportion * availableForContent));
+    if (section.lines.length > allowedLines) {
+      section.lines = section.lines.slice(0, allowedLines);
+      section.lines.push('', '> _(trimmed by compact — run codebase scan for full details)_');
+    }
+  }
+}
+
+function compactCodebaseIntel() {
+  const filePath = path.join(CONTEXT_DIR, PERSISTENT_FILE);
+  if (!fileExists(filePath)) return { skipped: true, reason: 'codebase-intel.md not found' };
+
+  const content = readFileContent(filePath);
+  if (!content) return { skipped: true, reason: 'codebase-intel.md is empty' };
+
+  const lines = content.split('\n');
+  const beforeLines = lines.length;
+
+  if (beforeLines <= CODEBASE_INTEL_MAX_LINES) {
+    return { skipped: true, reason: `${beforeLines} lines (under ${CODEBASE_INTEL_MAX_LINES} threshold)` };
+  }
+
+  // Parse into sections (## headings)
+  const sections = [];
+  let currentSection = { heading: '', lines: [] };
+  for (const line of lines) {
+    if (line.startsWith('## ')) {
+      if (currentSection.heading || currentSection.lines.length > 0) {
+        sections.push(currentSection);
+      }
+      currentSection = { heading: line, lines: [] };
+    } else {
+      currentSection.lines.push(line);
+    }
+  }
+  sections.push(currentSection);
+
+  removeStaleLines(sections);
+  removeConsecutiveBlanks(sections);
+
   let totalLines = sections.reduce((sum, s) => sum + (s.heading ? 1 : 0) + s.lines.length, 0);
 
-  // Pass 3: If still over target, trim each section proportionally
   if (totalLines > CODEBASE_INTEL_TARGET_LINES) {
-    const headingLines = sections.filter((s) => s.heading).length;
-    const availableForContent = CODEBASE_INTEL_TARGET_LINES - headingLines - 5; // 5 lines buffer
-    const totalContentLines = sections.reduce((sum, s) => sum + s.lines.length, 0);
-
-    if (totalContentLines > 0 && availableForContent > 0) {
-      for (const section of sections) {
-        const proportion = section.lines.length / totalContentLines;
-        const allowedLines = Math.max(3, Math.floor(proportion * availableForContent));
-        if (section.lines.length > allowedLines) {
-          section.lines = section.lines.slice(0, allowedLines);
-          section.lines.push('', '> _(trimmed by compact — run codebase scan for full details)_');
-        }
-      }
-    }
+    trimSectionsProportionally(sections, CODEBASE_INTEL_TARGET_LINES);
   }
 
   // Reassemble
@@ -2304,6 +2266,227 @@ function cmdCompact() {
 }
 
 // ─────────────────────────────────────────────────────────
+// COMMAND: progress (Enhancement A)
+// Reads all context files and outputs a structured progress report.
+// ─────────────────────────────────────────────────────────
+
+function analyzePhase1(phaseNum) {
+  const reqPath = path.join(CONTEXT_DIR, 'requirements.md');
+  const p = { status: 'not_started' };
+  if (!fileExists(reqPath)) return p;
+  const reqContent = readFileContent(reqPath);
+  const reqHeaders = parseContextHeaders(reqContent);
+  const acMatches = (reqContent || '').match(/^\s*[-*\d]+[.)]/gm);
+  p.ac_count = acMatches ? acMatches.length : 0;
+  p.confidence = reqHeaders.confidence || reqHeaders.confidence_level || null;
+  if (p.ac_count > 0 || (p.confidence && p.confidence.toLowerCase() !== '(pending)')) {
+    p.status = phaseNum > 1 ? 'complete' : 'in_progress';
+  }
+  return p;
+}
+
+function analyzePhase2(phaseStatus) {
+  const p = { status: 'not_started' };
+  const intelPath = path.join(CONTEXT_DIR, PERSISTENT_FILE);
+  if (!fileExists(intelPath)) return p;
+  const intelHeaders = parseContextHeaders(readFileContent(intelPath));
+  if (intelHeaders.last_updated && intelHeaders.last_updated !== '(pending)') {
+    p.status = phaseStatus(2);
+  }
+  return p;
+}
+
+function analyzePhase3(phaseNum) {
+  const planPath = path.join(CONTEXT_DIR, 'implementation-plan.md');
+  const p = { status: 'not_started' };
+  if (!fileExists(planPath)) return p;
+  const planContent = readFileContent(planPath);
+  const planHeaders = parseContextHeaders(planContent);
+  const stepMatches = (planContent || '').match(/^#+\s*(?:step|phase)\s*\d/gim);
+  p.plan_steps = stepMatches ? stepMatches.length : 0;
+  p.risk_level = planHeaders.risk_level || planHeaders.risk || null;
+  const status = planHeaders.status || '';
+  if (status.toLowerCase().includes('approved')) {
+    p.status = 'complete';
+  } else if (p.plan_steps > 0) {
+    p.status = phaseNum >= 3 ? 'in_progress' : 'not_started';
+  }
+  return p;
+}
+
+function analyzePhase4(phaseStatus) {
+  const codePath = path.join(CONTEXT_DIR, 'code-changes.md');
+  const p = { status: 'not_started' };
+  if (!fileExists(codePath)) return p;
+  const codeContent = readFileContent(codePath);
+  const fileMatches = (codeContent || '').match(/\|\s*`?[^|`]+\.[^|]+`?\s*\|\s*(?:CREATE|MODIFY|DELETE)/gi);
+  p.files_changed = fileMatches ? fileMatches.length : 0;
+  const devMatches = (codeContent || '').match(/deviation/gi);
+  p.deviations = devMatches ? devMatches.length : 0;
+  if (p.files_changed > 0) p.status = phaseStatus(4);
+  return p;
+}
+
+function analyzePhase5(phaseStatus) {
+  const testPath = path.join(CONTEXT_DIR, 'test-results.md');
+  const p = { status: 'not_started' };
+  if (!fileExists(testPath)) return p;
+  const testContent = readFileContent(testPath);
+  const passMatch = (testContent || '').match(/pass(?:ed|ing)?[:\s]*(\d+)/i);
+  const failMatch = (testContent || '').match(/fail(?:ed|ing|ure)?[:\s]*(\d+)/i);
+  const totalMatch = (testContent || '').match(/total[:\s]*(\d+)/i);
+  p.tests_total = totalMatch ? Number.parseInt(totalMatch[1], 10) : 0;
+  p.passing = passMatch ? Number.parseInt(passMatch[1], 10) : 0;
+  p.failing = failMatch ? Number.parseInt(failMatch[1], 10) : 0;
+  if (p.tests_total > 0 || p.passing > 0) p.status = phaseStatus(5);
+  return p;
+}
+
+function analyzePhase6(phaseNum, hasRealContent) {
+  const reviewPath = path.join(CONTEXT_DIR, 'review-report.md');
+  const p = { status: 'not_started' };
+  if (!fileExists(reviewPath)) return p;
+  const reviewContent = readFileContent(reviewPath);
+  const verdictMatch = (reviewContent || '').match(/verdict[:\s]*(APPROVED|REJECTED|CHANGES\s*REQUESTED)/i);
+  if (verdictMatch) {
+    p.verdict = verdictMatch[1].toUpperCase();
+    p.status = 'complete';
+  } else if (hasRealContent('review-report.md')) {
+    p.status = phaseNum === 6 ? 'in_progress' : 'not_started';
+  }
+  return p;
+}
+
+function analyzePhase7(phaseNum, hasRealContent) {
+  const gitPath = path.join(CONTEXT_DIR, 'git-status.md');
+  const p = { status: 'not_started' };
+  if (!fileExists(gitPath)) return p;
+  const gitContent = readFileContent(gitPath);
+  const pushMatch = (gitContent || '').match(/push\s*status[:\s]*(.+)/i);
+  if (pushMatch && !pushMatch[1].toLowerCase().includes('not pushed')) {
+    p.status = 'complete';
+    p.push_status = pushMatch[1].trim();
+  } else if (hasRealContent('git-status.md')) {
+    p.status = phaseNum === 7 ? 'in_progress' : 'not_started';
+  }
+  return p;
+}
+
+function collectBlockers(p5) {
+  const blockers = [];
+  if (p5.failing > 0) blockers.push(`${p5.failing} failing test(s) in Phase 5`);
+  const dbPath = path.join(CONTEXT_DIR, 'decisions-and-blockers.md');
+  if (!fileExists(dbPath)) return blockers;
+  const dbContent = readFileContent(dbPath);
+  const blockerSection = (dbContent || '').match(/blockers?[:\s]*([\s\S]*?)(?=\n##\s|$)/i);
+  if (blockerSection) {
+    const items = blockerSection[1].match(/^\s*[-*\d]+[.)\s]+.+$/gm);
+    if (items) {
+      for (const item of items) {
+        const text = item.replace(/^\s*[-*\d]+[.)\s]+/, '').trim();
+        if (text && !text.toLowerCase().includes('none')) blockers.push(text);
+      }
+    }
+  }
+  return blockers;
+}
+
+function calcTimeElapsed(started) {
+  if (!started || started === '(pending)') return null;
+  const startDate = new Date(started);
+  if (Number.isNaN(startDate.getTime())) return null;
+  const diffMs = Date.now() - startDate.getTime();
+  const hours = Math.floor(diffMs / 3600000);
+  const mins = Math.floor((diffMs % 3600000) / 60000);
+  return hours > 0 ? `${hours}h ${mins}m` : `${mins}m`;
+}
+
+function countDecisions() {
+  const dbPath = path.join(CONTEXT_DIR, 'decisions-and-blockers.md');
+  if (!fileExists(dbPath)) return 0;
+  const dbContent = readFileContent(dbPath);
+  const decSection = (dbContent || '').match(/decisions?[:\s]*([\s\S]*?)(?=\n##\s|$)/i);
+  if (!decSection) return 0;
+  const items = decSection[1].match(/^\s*[-*\d]+[.)\s]+.+$/gm);
+  return items ? items.length : 0;
+}
+
+function countResearchEntries() {
+  const resPath = path.join(CONTEXT_DIR, 'research-findings.md');
+  if (!fileExists(resPath)) return 0;
+  const resContent = readFileContent(resPath);
+  const entries = (resContent || '').match(/^##\s+/gm);
+  return entries ? entries.length : 0;
+}
+
+function cmdProgress() {
+  const statusPath = path.join(CONTEXT_DIR, 'task-status.md');
+  if (!fileExists(statusPath)) {
+    output({ status: 'idle', suggestion: 'No active task.' });
+    return;
+  }
+
+  const statusContent = readFileContent(statusPath);
+  const headers = parseContextHeaders(statusContent);
+
+  if (!headers.task_id || headers.task_id === '(none)' || headers.status === 'idle') {
+    output({ status: 'idle', suggestion: 'No active task.' });
+    return;
+  }
+
+  let phaseNum = null;
+  const phaseMatch = (headers.current_phase || '').match(/Phase\s+(\d+)/i);
+  if (phaseMatch) phaseNum = Number.parseInt(phaseMatch[1], 10);
+
+  const timeElapsed = calcTimeElapsed(headers.started);
+
+  function hasRealContent(filename) {
+    const fp = path.join(CONTEXT_DIR, filename);
+    if (!fileExists(fp)) return false;
+    const c = readFileContent(fp);
+    if (!c) return false;
+    const lower = c.toLowerCase();
+    return !lower.includes('(pending)') || lower.includes('(pending)') && c.length > 300;
+  }
+
+  function phaseStatusFn(targetPhase) {
+    if (phaseNum > targetPhase) return 'complete';
+    if (phaseNum === targetPhase) return 'in_progress';
+    return 'complete';
+  }
+
+  const p5 = analyzePhase5(phaseStatusFn);
+  const phases = {
+    '1_requirements': analyzePhase1(phaseNum),
+    '2_codebase_scan': analyzePhase2(phaseStatusFn),
+    '3_planning': analyzePhase3(phaseNum),
+    '4_development': analyzePhase4(phaseStatusFn),
+    '5_testing': p5,
+    '6_review': analyzePhase6(phaseNum, hasRealContent),
+    '7_git': analyzePhase7(phaseNum, hasRealContent),
+    '8_complete': { status: (headers.status === 'completed' || headers.status === 'archived') ? 'complete' : 'not_started' },
+  };
+
+  const blockers = collectBlockers(p5);
+  const decisionCount = countDecisions();
+  const researchCount = countResearchEntries();
+
+  output({
+    task_id: headers.task_id,
+    status: headers.status || 'active',
+    current_phase: phaseNum,
+    phase_name: phaseNum ? (PHASE_NAMES[phaseNum] || 'UNKNOWN') : null,
+    started: headers.started || null,
+    time_elapsed: timeElapsed,
+    profile: headers.context_profile || 'standard',
+    phases,
+    blockers: blockers.length > 0 ? blockers : undefined,
+    decisions: decisionCount > 0 ? decisionCount : undefined,
+    research_entries: researchCount > 0 ? researchCount : undefined,
+  });
+}
+
+// ─────────────────────────────────────────────────────────
 // COMMAND ROUTER
 // ─────────────────────────────────────────────────────────
 
@@ -2320,6 +2503,7 @@ const COMMANDS = {
   suspend: cmdSuspend,
   resume: cmdResume,
   compact: cmdCompact,
+  progress: cmdProgress,
 };
 
 function main() {
@@ -2344,6 +2528,7 @@ Commands:
   suspend [reason]               Pause current task
   resume                         Resume suspended task
   compact                        Compact oversized context files
+  progress                       Show structured progress report
 
 Flags:
   --context-dir <path>           Use external context directory
@@ -2364,4 +2549,13 @@ Flags:
   }
 }
 
-main();
+// Only run CLI when executed directly (not when required by other scripts)
+if (require.main === module) {
+  main();
+}
+
+// Export shared constants for other automation scripts
+// Usage: const { PROFILE_BUDGETS } = require('./context-tool');
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = { PROFILE_BUDGETS, PROFILE_FILES };
+}

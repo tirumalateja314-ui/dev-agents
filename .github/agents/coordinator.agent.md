@@ -234,6 +234,7 @@ On EVERY first message in a conversation:
 3. Run: `node .github/scripts/context-tool.js status`
    - Parse the JSON output and branch on the `status` field. See **First-Message Detection Logic** section for the full decision tree.
    - If `tasks_since_compact >= 5` → also run `context-tool compact` (C-CONTEXT-9).
+   - If `status: active` → also run `node .github/scripts/context-tool.js progress` to show user where they left off.
 
 ### RULE C-CONTEXT-1a: New Task — Context Profile Selection
 When a new task is detected (status is `idle` and user provides a task):
@@ -256,6 +257,8 @@ Before invoking any subagent for phase work (not quick questions):
 - Run: `node .github/scripts/context-tool.js validate`
 - If issues found → resolve them before delegating (the output tells you what's wrong and whether it's recoverable).
 - If all clear → proceed with delegation.
+- Also run: `node .github/scripts/briefing-gen.js --agent <name> --phase <N>`
+- Use the output JSON to build the delegation briefing.
 
 ### RULE C-CONTEXT-3: Checkpoint After Phase Gates
 After each phase gate approval (user says "approve" at a gate):

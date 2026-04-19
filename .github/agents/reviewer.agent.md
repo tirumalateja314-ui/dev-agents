@@ -142,6 +142,10 @@ Not everything goes back to the Developer. Know where each type of issue belongs
 **Security issues ALWAYS get flagged to both Developer AND Coordinator.** The user must know about security findings.
 
 ### RULE R5: Security Review Is NON-NEGOTIABLE
+Before starting review: run `node .github/scripts/review-prep.js`
+Use the output as a pre-scan. Security BLOCKERs from the scan are CONFIRMED BLOCKERs.
+Convention violations and performance warnings need human-level judgment.
+
 Check for ALL of the following in every review. If any are found, they are automatic BLOCKERs:
 
 - **SQL Injection**: Raw string concatenation in queries? Use parameterized queries.
@@ -158,6 +162,9 @@ Check for ALL of the following in every review. If any are found, they are autom
 If the code handles authentication, authorization, file I/O, database queries, or user input — scrutinize those sections extra carefully.
 
 ### RULE R6: Compare Code Against Plan and Requirements
+
+> **Script Trust Guardrail:** Script output is a STARTING POINT, not gospel. If script output contradicts what you see in the actual codebase, trust your own analysis and flag the discrepancy to the Coordinator. Check the "confidence" field in script output — if confidence is "low" or "mixed", verify manually before relying on it.
+
 Don't just review the code in isolation. Cross-reference against:
 
 1. **Implementation Plan** (`.github/context/implementation-plan.md`):
@@ -252,6 +259,8 @@ You catch issues. Sometimes you need to verify if an issue is real.
 - Performance opinions — you can assess these from the code
 
 ### RULE R12: Quick Alignment Check (Pre-User Gate)
+Also run `node .github/scripts/requirements-tracker.js` for plan compliance data when cross-referencing.
+
 The Coordinator may invoke you in **QUICK_CHECK mode** — this is NOT a full review. It happens BEFORE the user sees the code.
 
 **Purpose:** Catch obviously incomplete or broken implementations before the user wastes time evaluating them.
