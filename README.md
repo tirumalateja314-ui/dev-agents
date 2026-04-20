@@ -1,101 +1,110 @@
-# DevAgent — Multi-Agent AI Development Team
+# DevAgent — AI Development Agent for VS Code
 
-A team of **9 AI agents** inside VS Code Copilot that collaborate like a real development team. Give a task, get production-ready code with tests, review, and git operations.
+A single intelligent agent inside VS Code Copilot that adapts its approach to match task complexity. Simple tasks get done immediately. Complex tasks get planned first. Git operations are always safety-checked.
 
 ## How It Works
 
-You talk to the **Coordinator**. It delegates to 8 specialist subagents:
+You talk to **DevAgent**. It decides the approach based on what you ask:
 
 ```
                      YOU
                       │
                       ▼
-                 Coordinator
-          ┌──┬──┬──┬──┬──┬──┬──┬──┐
-          ▼  ▼  ▼  ▼  ▼  ▼  ▼  ▼  ▼
-        Story Code  Res  Arch Dev Test Rev  Git
-        Anlst Explr      Plan
+                  DevAgent
+                 /        \
+        (complex?)    (git ops?)
+           │               │
+           ▼               ▼
+        Planner      Git Operations
+           │               │
+           └───► back ◄────┘
 ```
 
-| # | Agent | Role | Phase |
-|---|-------|------|-------|
-| 0 | Coordinator | Team Lead — orchestrates everything | All |
-| 1 | Story Analyst | Parses requirements from any input | Phase 1 |
-| 2 | Codebase Explorer | Scans project structure & conventions | Phase 2 |
-| 3 | Researcher | Searches web, reads docs, verifies info | Any phase |
-| 4 | Architect Planner | Creates implementation plans | Phase 3 |
-| 5 | Developer | Writes production code following plans | Phase 4 |
-| 6 | Tester | Writes & runs tests | Phase 5 |
-| 7 | Reviewer | Reviews code quality, security, correctness | Phase 6 |
-| 8 | Git Manager | Branches, commits, pushes, creates MRs | Phase 7-8 |
+| Agent | Role | When Used |
+|-------|------|-----------|
+| DevAgent | Primary agent — explores, codes, tests, reviews | Always |
+| Planner | Read-only analysis, creates implementation plans | Complex/architecture tasks |
+| Git Operations | Safe git commands with pre-flight checks | Branching, committing, pushing |
 
-## The 8 Phases
+## Task Calibration
 
-```
-Phase 1: REQUIREMENTS    → Story Analyst parses your task
-Phase 2: EXPLORATION      → Codebase Explorer scans the project
-Phase 3: PLANNING         → Architect creates implementation plan  [GATE 1: Approve plan]
-Phase 4: DEVELOPMENT      → Developer writes code                  [GATE 2: Approve code]
-Phase 5: TESTING          → Tester writes & runs tests
-Phase 6: REVIEW           → Reviewer checks everything
-Phase 7: GIT PUSH         → Git Manager pushes code                [GATE 3: Approve push]
-Phase 8: MERGE REQUEST    → Git Manager creates MR                 [GATE 4: Approve MR]
-```
+DevAgent assesses every task and picks the right level of effort:
 
-4 approval gates where you review and approve before proceeding.
+- **Trivial** (typo, rename, config) — just does it, no questions
+- **Moderate** (feature, bug fix) — explores, implements, verifies
+- **Complex** (architecture, migration) — hands off to Planner first
+- **Debug** (something broken) — investigates, diagnoses, fixes
 
-## Quick Start
+No fixed phases. No approval gates for simple work. The agent uses judgment.
 
-1. Install [VS Code](https://code.visualstudio.com/) with [GitHub Copilot](https://marketplace.visualstudio.com/items?itemName=GitHub.copilot-chat)
-2. Clone this repo into your project's `.github/` folder
-3. Open VS Code and invoke the Coordinator: `@Coordinator build me a login page`
+## Safety
 
-## Key Features
-
-- **Per-path scope control** — set READ-WRITE, READ-ONLY, or NO-ACCESS per folder
-- **Vertical slice delivery** — large tasks split into independently testable slices
-- **Safety-first git** — 13+ destructive commands blocked, safety checkpoints before every operation
-- **Research on demand** — Researcher agent searches the web for solutions, comparisons, security advisories
-- **Requirements confidence gate** — LOW confidence blocks the pipeline until questions are answered
-- **Max 2 fix attempts** — prevents rabbit-hole debugging loops
-- **Team impact checks** — flags when changes affect CI/CD, dependencies, or dev workflows
+- **Git hooks** — 12+ destructive git patterns blocked automatically (force push, reset --hard, etc.)
+- **Code checks** — every file edit is scanned for security, performance, and convention issues
+- **Stop hook** — git state summary shown at end of every conversation
 
 ## Project Structure
 
 ```
 .github/
 ├── agents/
-│   ├── coordinator.agent.md
-│   ├── story-analyst.agent.md
-│   ├── codebase-explorer.agent.md
-│   ├── researcher.agent.md
-│   ├── architect-planner.agent.md
-│   ├── developer.agent.md
-│   ├── tester.agent.md
-│   ├── reviewer.agent.md
-│   └── git-manager.agent.md
+│   ├── devagent.agent.md             # Primary agent
+│   ├── planner.agent.md              # Read-only planning subagent
+│   └── git-ops.agent.md              # Git operations subagent
+├── hooks/
+│   └── devagent-hooks.json           # Automated pre/post tool checks
 ├── instructions/
-│   └── copilot-instructions.md      (global rules for all agents)
-└── context/                          (runtime — created during tasks)
-    ├── task-status.md
-    ├── requirements.md
-    ├── codebase-intel.md
-    ├── implementation-plan.md
-    ├── code-changes.md
-    ├── test-results.md
-    ├── review-report.md
-    ├── research-findings.md
-    ├── git-status.md
-    └── decisions-and-blockers.md
+│   └── copilot-instructions.md       # Global rules (all agents)
+├── skills/                           # On-demand domain expertise
+│   ├── code-review/
+│   ├── codebase-explore/
+│   ├── full-spec/
+│   ├── git-workflow/
+│   ├── research/
+│   └── testing/
+├── scripts/                          # Automation (zero npm deps)
+│   ├── code-check.js
+│   ├── git-safety-check.js
+│   ├── project-context.js
+│   ├── convention-scanner.js
+│   ├── codebase-diff.js
+│   ├── review-prep.js
+│   ├── automation-tests.js           # 90 unit tests
+│   └── integration-test.js           # 20 integration tests
+├── prompts/                          # Quick-launch entry points
+│   ├── initialize-project.prompt.md
+│   └── quick-fix.prompt.md
+├── context/                          # Runtime project intel
+│   ├── codebase-intel.md
+│   ├── conventions.json
+│   └── README.md
+└── _archive/v1/                      # Previous 9-agent system
 ```
 
-## Documentation
+## Quick Start
 
-Full documentation available at the [DevAgent Docs Website](https://dev-agents-web.vercel.app/) (or run locally from `/docs-website`).
+1. Install [VS Code](https://code.visualstudio.com/) with [GitHub Copilot](https://marketplace.visualstudio.com/items?itemName=GitHub.copilot-chat)
+2. Clone this repo's `.github/` folder into your project
+3. Open VS Code and talk to DevAgent: `@DevAgent add a search bar to the header`
+
+## Running Tests
+
+```bash
+cd .github/scripts
+node automation-tests.js       # 90 unit tests
+node integration-test.js       # 20 integration tests
+```
+
+All scripts are CommonJS, zero npm dependencies, Node.js >= 18.
 
 ## Git Platform
 
-This project uses **GitLab** with Merge Request (MR) terminology. CI/CD is `.gitlab-ci.yml`.
+This project uses **GitLab** with Merge Request (MR) terminology.
+
+## V1 → V2
+
+V2 replaced 9 specialized agents with 1 adaptive agent + 2 lightweight subagents.
+See [_archive/v1/MIGRATION.md](.github/_archive/v1/MIGRATION.md) for details.
 
 ## License
 

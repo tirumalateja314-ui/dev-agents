@@ -1,3 +1,6 @@
+# Internal planning docs
+problem-identification.md
+
 # Docs website (separate deployment)
 docs-website/
 
@@ -52,3 +55,5 @@ automation-plan.md
 # Stray files
 research-findings.md
 context-engineering.md
+v1-implementaion.md
+2temp.md

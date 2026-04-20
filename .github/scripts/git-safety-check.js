@@ -472,11 +472,200 @@ function buildWarningsAndBlockers(gitState, uncommitted, categorized, remoteStat
 }
 
 // ─────────────────────────────────────────────────────────
+// HOOK UTILITIES
+// ─────────────────────────────────────────────────────────
+
+function hasFlag(name) {
+  return process.argv.includes(name);
+}
+
+function readHookInput() {
+  if (process.stdin.isTTY) return null;
+  try {
+    const data = fs.readFileSync(0, 'utf-8').trim();
+    return data ? JSON.parse(data) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Patterns that indicate a dangerous git operation requiring safety checks.
+ * Used by --pre-check to gate run_in_terminal commands.
+ */
+const DANGEROUS_GIT_PATTERNS = [
+  /\bgit\s+push\b/,
+  /\bgit\s+push\s+.*--force\b/,
+  /\bgit\s+push\s+.*-f\b/,
+  /\bgit\s+reset\s+--hard\b/,
+  /\bgit\s+clean\s+-fd\b/,
+  /\bgit\s+checkout\s+--\s+\./,
+  /\bgit\s+branch\s+-[dD]\b/,
+  /\bgit\s+rebase\b/,
+  /\bgit\s+merge\b/,
+  /\bgit\s+stash\s+drop\b/,
+  /\bgit\s+tag\s+-d\b/,
+  /\bgit\s+remote\s+(add|remove|set-url)\b/,
+];
+
+function isDangerousGitCommand(command) {
+  if (!command || typeof command !== 'string') return false;
+  return DANGEROUS_GIT_PATTERNS.some(pattern => pattern.test(command));
+}
+
+// ─────────────────────────────────────────────────────────
+// --pre-check: PreToolUse hook for terminal commands
+// ─────────────────────────────────────────────────────────
+
+function runPreCheck(hookInput, repoRoot) {
+  // Only gate run_in_terminal
+  if (hookInput.tool_name !== 'run_in_terminal') {
+    console.log(JSON.stringify({
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        permissionDecision: 'allow',
+      },
+    }));
+    return;
+  }
+
+  const command = hookInput.tool_input?.command || '';
+
+  // Non-git commands: allow immediately
+  if (!isDangerousGitCommand(command)) {
+    console.log(JSON.stringify({
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        permissionDecision: 'allow',
+      },
+    }));
+    return;
+  }
+
+  // Dangerous git command detected → run safety checks
+  const repoCheck = checkGitRepo(repoRoot);
+  if (!repoCheck.isRepo) {
+    console.log(JSON.stringify({
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        permissionDecision: 'deny',
+        reason: 'Not a git repository. Cannot run git commands safely.',
+      },
+    }));
+    return;
+  }
+
+  const gitState = gatherGitState(repoRoot);
+  const uncommitted = detectUncommittedChanges(repoRoot);
+  const edgeCases = detectEdgeCases(repoRoot, gitState);
+  const contextDir = path.join(repoRoot, '.github', 'context');
+  const codeChangesContent = readFileSafe(path.join(contextDir, 'code-changes.md'));
+  const categorized = categorizeChanges(uncommitted, codeChangesContent, contextDir);
+  const remoteStatus = checkRemoteStatus(repoRoot, gitState);
+
+  const { warnings, blockers } = buildWarningsAndBlockers(
+    gitState, uncommitted, categorized, remoteStatus, edgeCases
+  );
+
+  if (blockers.length > 0) {
+    console.log(JSON.stringify({
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        permissionDecision: 'deny',
+        reason: `Blocked: ${blockers.join('; ')}`,
+      },
+    }));
+  } else if (warnings.length > 0) {
+    console.log(JSON.stringify({
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        permissionDecision: 'ask',
+        reason: `Warnings: ${warnings.join('; ')}`,
+      },
+    }));
+  } else {
+    console.log(JSON.stringify({
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        permissionDecision: 'allow',
+      },
+    }));
+  }
+}
+
+// ─────────────────────────────────────────────────────────
+// --quick: Compact safety summary (used by Stop hook)
+// ─────────────────────────────────────────────────────────
+
+function runQuick(repoRoot) {
+  const repoCheck = checkGitRepo(repoRoot);
+  if (!repoCheck.isRepo) {
+    output({ safe_to_proceed: false, blockers: ['Not a git repository'] });
+    return;
+  }
+
+  const gitState = gatherGitState(repoRoot);
+  const uncommitted = detectUncommittedChanges(repoRoot);
+  const edgeCases = detectEdgeCases(repoRoot, gitState);
+
+  const quickBlockers = [];
+  const quickWarnings = [];
+
+  // Check for merge conflicts
+  if (edgeCases.merge_in_progress) {
+    quickBlockers.push('Merge in progress — resolve before ending session');
+  }
+  if (edgeCases.rebase_in_progress) {
+    quickBlockers.push('Rebase in progress — complete or abort before ending session');
+  }
+
+  // Check for uncommitted changes
+  if (uncommitted.total > 0) {
+    const parts = [];
+    if (uncommitted.staged.length > 0) parts.push(`${uncommitted.staged.length} staged`);
+    if (uncommitted.unstaged.length > 0) parts.push(`${uncommitted.unstaged.length} unstaged`);
+    if (uncommitted.untracked.length > 0) parts.push(`${uncommitted.untracked.length} untracked`);
+    quickWarnings.push(`${uncommitted.total} uncommitted changes (${parts.join(', ')})`);
+  }
+
+  // Detached HEAD
+  if (gitState.is_detached) {
+    quickWarnings.push('Detached HEAD — changes may be lost');
+  }
+
+  output({
+    safe_to_proceed: quickBlockers.length === 0,
+    branch: gitState.branch,
+    blockers: quickBlockers.length > 0 ? quickBlockers : undefined,
+    warnings: quickWarnings.length > 0 ? quickWarnings : undefined,
+  });
+}
+
+// ─────────────────────────────────────────────────────────
 // MAIN
 // ─────────────────────────────────────────────────────────
 
 function main() {
   const repoRoot = findRepoRoot(process.cwd());
+
+  // --pre-check mode: PreToolUse hook for dangerous git commands
+  if (hasFlag('--pre-check')) {
+    const hookInput = readHookInput();
+    if (!hookInput) {
+      console.error('--pre-check requires hook input on stdin');
+      process.exit(1);
+    }
+    runPreCheck(hookInput, repoRoot);
+    return;
+  }
+
+  // --quick mode: compact safety summary for Stop hook
+  if (hasFlag('--quick')) {
+    runQuick(repoRoot);
+    return;
+  }
+
+  // Default: full safety check (original behavior)
   const contextDirFlag = getFlag('--context-dir');
   const contextDir = contextDirFlag
     ? path.resolve(contextDirFlag)
@@ -566,4 +755,6 @@ module.exports = {
   checkRemoteStatus,
   detectEdgeCases,
   buildWarningsAndBlockers,
+  isDangerousGitCommand,
+  DANGEROUS_GIT_PATTERNS,
 };

@@ -1,105 +1,25 @@
-# DevAgent Context System
+# DevAgent Context
 
-This folder contains shared state files used by the DevAgent multi-agent workflow. Agents communicate and stay in sync by writing to and reading from these files.
+This directory holds **persistent, auto-generated project knowledge** used by DevAgent scripts. It is NOT used for agent-to-agent communication (V1 used it that way — V2 uses the built-in memory system instead).
 
-All context file mechanics (create, archive, checkpoint, validate, search) are handled by **`context-tool.js`** — a CLI script at `.github/scripts/context-tool.js`. Agents call the script via terminal commands. Zero external dependencies (Node.js `fs` + `path` only).
+## Files
 
-## Folder Structure
+| File | Written By | Purpose |
+|------|-----------|---------|
+| `codebase-intel.md` | `project-context.js scan` | Persistent project knowledge — tech stack, architecture, key files, conventions (human-readable) |
+| `conventions.json` | `project-context.js scan` | Auto-detected conventions — language, naming, code style, testing (machine-readable, used by `code-check.js`) |
 
-```
-.github/context/
-├── _templates/              ← 9 task-level templates (copied per task by init)
-│   ├── task-status.md
-│   ├── requirements.md
-│   ├── implementation-plan.md
-│   ├── code-changes.md
-│   ├── test-results.md
-│   ├── review-report.md
-│   ├── git-status.md
-│   ├── research-findings.md
-│   └── decisions-and-blockers.md
-├── codebase-intel.md        ← Persistent project-level knowledge (NOT a template)
-├── task-status.md           ← Current task state (managed by script)
-├── (active context files)   ← Created per task by `init`, archived on completion
-├── checkpoints/             ← Phase snapshots for rollback/resume
-│   └── phase-N-complete/
-└── archive/                 ← Completed/abandoned tasks
-    ├── task-index.md        ← Searchable index of all past tasks
-    └── TASK-YYYY-MM-DD-name/
-        ├── manifest.md      ← Task summary card
-        └── (all context files from that task)
-```
+Both files are updated when `project-context.js scan` runs (either via the `/codebase-explore` skill or the `initialize-project` prompt). They persist across tasks and conversations.
 
-## Context Files
+## Memory System (replaces V1 context files)
 
-| File | Owner Agent | Purpose | Persists Across Tasks? |
-|------|------------|---------|----------------------|
-| `task-status.md` | Coordinator | Task ID, status, current phase, phase history | No — reset per task |
-| `requirements.md` | Story Analyst | Parsed requirements, acceptance criteria, Q&A | No — reset per task |
-| `codebase-intel.md` | Codebase Explorer | Tech stack, structure, conventions, relevant files | **Yes** — project-level |
-| `implementation-plan.md` | Architect Planner | Approach, steps, risks, git strategy | No — reset per task |
-| `code-changes.md` | Developer | Files changed, what/why, deviations from plan | No — reset per task |
-| `test-results.md` | Tester | Tests written, results, bugs found | No — reset per task |
-| `review-report.md` | Reviewer | Verdict, issues, requirements verification | No — reset per task |
-| `git-status.md` | Git Manager | Branch, commits, CI status, MR link | No — reset per task |
-| `research-findings.md` | Researcher | Web research findings, sourced and rated | No — accumulates within task, archived on completion |
-| `decisions-and-blockers.md` | Coordinator | Decision log, open blockers, escalations | No — reset per task |
+V2 uses VS Code Copilot's built-in memory instead of custom context templates:
 
-## Script Commands
+- **`/memories/repo/`** — Persistent project knowledge that survives across all conversations. Store tech stack findings, patterns, decisions, and known issues here.
+- **`/memories/session/`** — Current task progress and exploration notes. Automatically cleared when the conversation ends.
 
-```bash
-node .github/scripts/context-tool.js <command> [args]
-```
+The agent creates memory files as needed during work — there are no pre-defined templates.
 
-| Command | What It Does | When |
-|---------|-------------|------|
-| `setup` | Creates folder structure, templates, persistent files | First-time repo setup (one-time) |
-| `init <name> [--profile <p>]` | Generates Task ID, copies templates to active context | Start of new task |
-| `status` | Returns current task state as JSON | First message of conversation, "where are we?" |
-| `archive [--abandoned]` | Generates manifest, moves to archive, resets to idle | Phase 8 completion or abandonment |
-| `validate` | Checks Task ID consistency, required sections, staleness | Before delegating to any agent |
-| `checkpoint <phase>` | Copies current context files to checkpoint folder | After each phase gate approval |
-| `rollback <phase>` | Restores checkpoint, removes later checkpoints | User says "go back to planning" |
-| `suspend [reason]` | Saves checkpoint, marks status as suspended | User pauses or new task while active |
-| `resume` | Restores suspended task, returns resumable state | User resumes a suspended task |
-| `search <query>` | Searches task-index.md and manifests by keyword/tag | User asks about past work |
-| `history [--last N]` | Returns last N task summaries | User asks "what did we do?" |
-| `compact` | Compacts oversized files (codebase-intel, task-index) | When files exceed size thresholds |
+## V1 Archive
 
-## Task ID System
-
-Every task gets a unique ID: `TASK-{YYYY-MM-DD}-{short-kebab-name}`
-
-- Generated by `init` command at task start
-- Written to every context file header for traceability
-- Used as archive folder name for history queries
-- Duplicates on same day get a suffix: `TASK-2026-04-18-add-auth-2`
-
-## Rules
-
-1. **One owner per file** — only the owning agent writes to its file. All other agents may read it.
-2. **Timestamps required** — every update must include a `**Last Updated**` timestamp.
-3. **Task ID required** — every context file header must include the current Task ID.
-4. **Markdown format** — all context files use markdown for readability and parseability.
-5. **Concise entries** — other agents have limited context windows. Keep content focused and relevant.
-6. **Append, don't overwrite** — unless doing a full refresh, append new information rather than replacing.
-7. **`codebase-intel.md` is persistent** — it survives across tasks. On new tasks, refresh relevant sections rather than rewriting from scratch.
-8. **All other files reset per task** — the `init` command creates fresh copies from `_templates/`. The `archive` command moves completed task files to the archive.
-
-## Archive Convention
-
-When a task completes (Phase 8) or is abandoned, context files are archived by `context-tool.js`:
-
-```
-.github/context/archive/TASK-2026-04-18-add-auth/
-├── manifest.md          ← Auto-generated summary card (tags, files changed, decisions)
-├── task-status.md
-├── requirements.md
-└── ... (all context files from that task)
-```
-
-Each archived task also gets an entry in `archive/task-index.md` — a searchable table of all past tasks.
-
-## Design Document
-
-Full context engineering design (18 sections): see `context-engineering.md` at the repo root.
+The previous context system (9 templates, task pipeline, checkpoints, archive) has been moved to `.github/_archive/v1/context/` for reference.

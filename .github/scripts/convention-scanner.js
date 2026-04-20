@@ -1134,33 +1134,21 @@ function detectProject(repoRoot, configFiles, pkg) {
 }
 
 // ─────────────────────────────────────────────────────────
-// MAIN: Assemble and output
+// REUSABLE SCAN FUNCTION (used by project-context.js)
 // ─────────────────────────────────────────────────────────
 
-function main() {
-  const focusArea = getFlag('--focus') || 'all';
-  const outputPath = getFlag('--output');
+function runScan(repoRoot, focusArea) {
+  focusArea = focusArea || 'all';
   const validAreas = ['all', 'code', 'testing', 'git', 'imports', 'errors'];
+  if (!validAreas.includes(focusArea)) return null;
 
-  if (!validAreas.includes(focusArea)) {
-    fail(`Invalid focus area: "${focusArea}". Valid: ${validAreas.join(', ')}`);
-  }
-
-  const repoRoot = findRepoRoot(process.cwd());
-
-  // Step 1: File discovery
   const { files, extCounts, totalFiles } = discoverFiles(repoRoot);
-
-  // Step 2: Config file detection
   const configFiles = detectConfigFiles(repoRoot);
   const pkg = parsePackageJson(repoRoot);
   const tsconfig = parseTsConfig(repoRoot);
   const codeStyle = parseCodeStyleConfigs(repoRoot, configFiles);
-
-  // Step 2.5: Language detection
   const language = detectLanguage(extCounts, configFiles, repoRoot);
 
-  // Build result based on focus area
   const result = {
     scanned_at: now(),
     repo_root: repoRoot,
@@ -1174,7 +1162,6 @@ function main() {
     },
   };
 
-  // Step 3: Source file conventions (code, imports, errors areas)
   if (['all', 'code', 'imports', 'errors'].includes(focusArea)) {
     const sourceFiles = pickSourceFiles(files, language.primary, 5);
     const sourceConventions = extractSourceConventions(repoRoot, sourceFiles, language.primary);
@@ -1193,30 +1180,42 @@ function main() {
     }
   }
 
-  // Step 4: Test conventions
   if (['all', 'testing'].includes(focusArea)) {
     const testFiles = findTestFiles(files, language.primary);
     const testConventions = extractTestConventions(repoRoot, testFiles, language.primary);
     result.conventions.testing = testConventions;
   }
 
-  // Step 5: Git conventions
   if (['all', 'git'].includes(focusArea)) {
     const gitConventions = extractGitConventions(repoRoot);
     result.conventions.git = gitConventions;
   }
 
-  // Step 7: Project detection
   if (focusArea === 'all') {
     result.conventions.project = detectProject(repoRoot, configFiles, pkg);
-
-    // Add tsconfig info if available
     if (tsconfig) {
       result.conventions.typescript_config = tsconfig;
     }
   }
 
-  // Output
+  return result;
+}
+
+// ─────────────────────────────────────────────────────────
+// MAIN: CLI entry point
+// ─────────────────────────────────────────────────────────
+
+function main() {
+  const focusArea = getFlag('--focus') || 'all';
+  const outputPath = getFlag('--output');
+
+  const repoRoot = findRepoRoot(process.cwd());
+  const result = runScan(repoRoot, focusArea);
+
+  if (!result) {
+    fail(`Invalid focus area: "${focusArea}". Valid: all, code, testing, git, imports, errors`);
+  }
+
   if (outputPath) {
     const resolvedPath = path.resolve(outputPath);
     const dir = path.dirname(resolvedPath);
@@ -1224,7 +1223,7 @@ function main() {
       fs.mkdirSync(dir, { recursive: true });
     }
     fs.writeFileSync(resolvedPath, JSON.stringify(result, null, 2), 'utf-8');
-    output({ written_to: resolvedPath, files_scanned: totalFiles, language: language.primary });
+    output({ written_to: resolvedPath, files_scanned: result.files_scanned, language: result.conventions.language.primary });
   } else {
     output(result);
   }
@@ -1236,6 +1235,7 @@ if (require.main === module) {
 }
 
 module.exports = {
+  runScan,
   discoverFiles,
   detectLanguage,
   detectNamingPattern,
